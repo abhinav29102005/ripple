@@ -54,3 +54,20 @@ Running log of decisions, verification results, and adaptations made during deve
 
 ### 5. Port Configuration
 - Host port 6379 had a pre-existing container `mlsc-redis` which was stopped to allow FalkorDB to run on the standard port `6379`. Port is also configurable via `FALKORDB_PORT` in `.env`.
+
+---
+
+## 2026-10-17: Milestone M1 - Coordination Core
+
+### 1. Coordination Implementation (`coord.py`)
+- **FalkorDB Native:** No in-memory state or external brokers. The `Task` nodes, `Agent` nodes, and `DEPENDS_ON` / `SPAWNED` edges in the `coord` graph act as the single source of truth.
+- **Dependency Gating:** Query pattern `OPTIONAL MATCH (t)-[:DEPENDS_ON]->(d:Task) WHERE d.status <> 'done' WITH t, count(d) AS open WHERE open = 0` guarantees tasks only become claimable when all prerequisite tasks have reached status `done`.
+- **Lease Expiry & Auto-Reclaim:** Claimed tasks are assigned `lease_until = $now + $lease`. Reclaim query `MATCH (t:Task {status: 'claimed'}) WHERE t.lease_until <= $now SET t.status = 'queued', t.claimed_by = null` resets stranded tasks back to `queued`.
+- **Max Attempts & Retry:** Failed tasks increment attempt counter; if `attempts < max_attempts`, status resets to `queued` for automated retry; otherwise transitions to `failed` and records the error payload.
+
+### 2. Acceptance Criteria Verification
+- Ran 16 concurrent worker processes claiming and completing 500 tasks.
+  - Zero double claims.
+  - 100% completion rate (500/500).
+- Simulating worker crashes (`os._exit(0)` mid-task) verified that expired leases are safely reclaimed and completed by another worker.
+- All unit and concurrency tests pass (`pytest tests/test_coord.py`).
