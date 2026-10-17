@@ -71,3 +71,24 @@ Running log of decisions, verification results, and adaptations made during deve
   - 100% completion rate (500/500).
 - Simulating worker crashes (`os._exit(0)` mid-task) verified that expired leases are safely reclaimed and completed by another worker.
 - All unit and concurrency tests pass (`pytest tests/test_coord.py`).
+
+---
+
+## 2026-10-17: Milestone M2 - Knowledge Graph & Pipeline
+
+### 1. Statistical Pooling Math (`stats.py`)
+- Verified against the exact required test vector in Section 8.1:
+  - Three trials (A: -0.4, B: -0.5, C retracted: -0.9).
+  - Before pooling: -0.6788, SE: 0.1082, 95% CI: [-0.891, -0.467].
+  - After retraction: -0.4390, SE: 0.1562, 95% CI: [-0.745, -0.133].
+  - Percentage change in pooled effect: +35.3% (attenuation).
+- Implemented dual-criteria clinical flip detection:
+  - Sign flip: `before * after < 0` (direction of effect reverses).
+  - Significance flip: 95% confidence interval crossing zero transitions between statistically significant and non-significant.
+
+### 2. Multi-Agent Pipeline DAG
+- Retraction notice ingestion initiates DAG: `ingest -> trace -> (quantify x N) -> brief`.
+- The `Tracer` fans out `quantify` tasks per affected review, and registers the `brief` task with `depends_on_keys` matching all quantify tasks.
+- FalkorDB atomic claim enforces that the `Briefer` cannot claim its task until all `quantify` tasks have completed.
+- Each `Statistician` computes effect sizes and persists native `Impact` nodes connected via `(Impact)-[:OF]->(Review)`.
+- Verified end-to-end in `tests/test_pipeline.py`.
