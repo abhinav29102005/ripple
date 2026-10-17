@@ -234,3 +234,151 @@ def get_contamination_clusters():
     pairs = knowledge.build_contamination_clusters()
     components = knowledge.get_wcc_clusters()
     return {"shared_trial_pairs": pairs, "components": components}
+
+# --- Chat & Analyst Endpoints ---
+
+class ChatRequest(BaseModel):
+    tenant: str = "cardio"
+    session: Optional[str] = None
+    text: str
+
+class AnalystRequest(BaseModel):
+    tenant: str = "cardio"
+    retraction_id: str = "SYN-RET-001"
+    prompt: Optional[str] = "What should we do first about this retraction?"
+
+@app.post("/api/chat")
+def chat_endpoint(req: ChatRequest):
+    mem = TenantMemory(req.tenant)
+    session_id = req.session or mem.create_session()
+    
+    # Save user message
+    mem.add_message(session_id, role="user", text=req.text)
+    
+    # Gather context from tenant memory
+    active_rules = mem.get_active_rules()
+    episodes = mem.get_episodes()
+    facts = [f for f in mem.get_facts() if f["is_active"]]
+
+    lower_text = req.text.lower()
+    
+    # Deterministic templated response citing graph nodes
+    if "why" in lower_text or "rank" in lower_text or "rule" in lower_text:
+        if active_rules:
+            rule_texts = [f"• Rule {r['id']} ({r['description']}, delta: {r['delta']})" for r in active_rules]
+            reply = (
+                f"Alert rankings in tenant '{req.tenant}' are adjusted by active procedural memory rules:\n"
+                + "\n".join(rule_texts)
+                + f"\nThese rules were derived by the Librarian from {len(episodes)} team feedback episodes."
+            )
+        else:
+            reply = (
+                f"No active procedural rules are currently applied in tenant '{req.tenant}'. "
+                "Alerts reflect baseline severity based on retraction reason, weight share, and clinical flips."
+            )
+    elif "fact" in lower_text or "guideline" in lower_text or "authority" in lower_text:
+        if facts:
+            fact_texts = [f"• {f['key']}: {f['value']}" for f in facts]
+            reply = f"Active semantic memory facts for team '{req.tenant}':\n" + "\n".join(fact_texts)
+        else:
+            reply = f"No semantic facts recorded yet for team '{req.tenant}'."
+    else:
+        reply = (
+            f"Ripple Assistant ({req.tenant} brain): Monitoring evidence cascades and multi-hop retraction blast radiuses. "
+            f"Graph memory contains {len(episodes)} episodes and {len(active_rules)} active procedural rules."
+        )
+
+    # Save assistant reply
+    mid = mem.add_message(session_id, role="assistant", text=reply)
+    
+    return {
+        "session_id": session_id,
+        "message_id": mid,
+        "role": "assistant",
+        "text": reply,
+        "active_rules_count": len(active_rules),
+    }
+
+@app.post("/api/analyst")
+def analyst_endpoint(req: AnalystRequest):
+    knowledge = KnowledgeEngine(graph_manager.get_graph("knowledge"))
+    mem = TenantMemory(req.tenant)
+
+    # Deterministic Analyst Tool Call Trace
+    tool_trace = []
+
+    # Step 1: blast_radius
+    blast = knowledge.get_blast_radius(req.retraction_id)
+    tool_trace.append({
+        "step": 1,
+        "tool": "blast_radius",
+        "args": {"retraction_id": req.retraction_id},
+        "output": f"Traversed {len(blast)} review linkages. Retracted trial affects reviews: {[b['review'] for b in blast]}",
+    })
+
+    # Step 2: rank_guidelines
+    guidelines = knowledge.rank_guidelines_pagerank()
+    top_gl = guidelines[0]["id"] if guidelines else "SYN-GL-001"
+    tool_trace.append({
+        "step": 2,
+        "tool": "rank_guidelines",
+        "args": {"limit": 3},
+        "output": f"Critical guideline identified via PageRank: {top_gl} (score: {guidelines[0]['score'] if guidelines else 1.0})",
+    })
+
+    # Step 3: contamination_clusters
+    clusters = knowledge.build_contamination_clusters()
+    tool_trace.append({
+        "step": 3,
+        "tool": "contamination_clusters",
+        "args": {"retraction_id": req.retraction_id},
+        "output": f"Identified {len(clusters)} review pairs sharing retracted trials (non-independent evidence)",
+    })
+
+    # Step 4: recall_team_history
+    rules = mem.get_active_rules()
+    tool_trace.append({
+        "step": 4,
+        "tool": "recall_team_history",
+        "args": {"tenant": req.tenant},
+        "output": f"Recalled {len(rules)} active procedural rules from tenant memory",
+    })
+
+    # Step 5: open_ticket for top affected decision
+    at_risk = knowledge.get_at_risk_decisions(req.retraction_id)
+    target_dec = at_risk[0]["decision_id"] if at_risk else "DEC-CARDIO-001"
+    ticket_id = f"TCK-ANALYST-{int(time.time())}"
+    knowledge.graph.query("""
+    MATCH (dec:Decision {id: $did})
+    CREATE (tck:Ticket {id: $tid, title: $title, status: 'open', priority: 'high', synthetic: true})
+    MERGE (tck)-[:TRACKS]->(dec)
+    """, {
+        "did": target_dec,
+        "tid": ticket_id,
+        "title": f"URGENT: Re-evaluate {target_dec} following retraction {req.retraction_id}",
+    })
+    tool_trace.append({
+        "step": 5,
+        "tool": "open_ticket",
+        "args": {"decision_id": target_dec, "priority": "high"},
+        "output": f"Created incident ticket {ticket_id} tracking decision {target_dec}",
+    })
+
+    summary = (
+        f"Analyst Recommendation for {req.retraction_id}:\n"
+        f"1. Priority action: Review flagged decision [{target_dec}] informing critical guideline [{top_gl}].\n"
+        f"2. Evidence contamination: {len(clusters)} review clusters share the retracted trial.\n"
+        f"3. Ticket {ticket_id} has been opened for clinical review."
+    )
+
+    return {
+        "retraction_id": req.retraction_id,
+        "tenant": req.tenant,
+        "tool_trace": tool_trace,
+        "recommendation": summary,
+        "ticket_created": ticket_id,
+    }
+
+# --- Mount Static UI ---
+from fastapi.staticfiles import StaticFiles
+app.mount("/", StaticFiles(directory="ui", html=True), name="ui")

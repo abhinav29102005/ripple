@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RIPPLE — FalkorDB Autonomous Agent Memory & Retraction Blast Engine</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+</head>
+<body>
+  <!-- Header Bar -->
+  <header class="navbar" id="main-header">
+    <div class="brand">
+      <div class="brand-pulse"></div>
+      <div class="brand-text">
+        <span class="brand-name">RIPPLE</span>
+        <span class="brand-tag">FalkorDB Agent Brain</span>
+      </div>
+    </div>
+
+    <div class="nav-controls">
+      <div class="control-group">
+        <label for="tenant-select">Team Memory:</label>
+        <select id="tenant-select" class="select-input">
+          <option value="cardio" selected>Cardiology Committee</option>
+          <option value="onco">Oncology Committee</option>
+        </select>
+      </div>
+
+      <div class="control-group">
+        <label for="retraction-select">Retraction Event:</label>
+        <select id="retraction-select" class="select-input">
+          <option value="SYN-RET-001" selected>SYN-RET-001 (Fabrication)</option>
+          <option value="SYN-RET-002">SYN-RET-002 (Calculation Error)</option>
+          <option value="SYN-RET-003">SYN-RET-003 (Administrative)</option>
+          <option value="SYN-RET-004">SYN-RET-004 (Unknown)</option>
+        </select>
+      </div>
+
+      <button id="btn-new-retraction" class="btn btn-primary" onclick="openSubmitModal()">+ Submit Notice</button>
+      <button id="btn-refresh-all" class="btn btn-secondary" onclick="refreshDashboard()">Refresh</button>
+    </div>
+  </header>
+
+  <!-- Main 4-Panel Grid -->
+  <main class="dashboard-grid">
+    <!-- Panel 1: Graph Explorer -->
+    <section class="panel" id="panel-graph">
+      <div class="panel-header">
+        <div class="panel-title">
+          <span class="icon">🕸️</span> 1. Evidence Blast Radius (Knowledge Graph)
+        </div>
+        <div class="panel-actions">
+          <span class="badge badge-info" id="graph-node-count">0 nodes</span>
+          <button class="btn btn-xs" onclick="resetGraphView()">Reset View</button>
+        </div>
+      </div>
+      <div class="panel-body graph-container" id="graph-wrapper">
+        <svg id="blast-graph"></svg>
+        <div id="graph-inspector" class="inspector-card hidden">
+          <div class="inspector-header">
+            <span id="inspect-label" class="badge">Node</span>
+            <button class="btn-close" onclick="closeInspector()">×</button>
+          </div>
+          <h4 id="inspect-title">Node Title</h4>
+          <div id="inspect-details" class="inspector-content"></div>
+        </div>
+      </div>
+      <div class="graph-legend">
+        <span class="legend-item"><span class="dot dot-retraction"></span>Retraction</span>
+        <span class="legend-item"><span class="dot dot-trial"></span>Trial</span>
+        <span class="legend-item"><span class="dot dot-review"></span>Review</span>
+        <span class="legend-item"><span class="dot dot-guideline"></span>Guideline</span>
+        <span class="legend-item"><span class="dot dot-decision"></span>Decision</span>
+      </div>
+    </section>
+
+    <!-- Panel 2: Live Coordination Task Board -->
+    <section class="panel" id="panel-coordination">
+      <div class="panel-header">
+        <div class="panel-title">
+          <span class="icon">⚡</span> 2. FalkorDB Task Queue (Zero Double-Claim)
+        </div>
+        <div class="panel-actions">
+          <button class="btn btn-xs btn-outline" onclick="triggerSimulatedTask()">+ Spawn Task</button>
+        </div>
+      </div>
+      <div class="panel-body board-container">
+        <div class="board-column" id="col-queued">
+          <div class="column-header">Queued <span class="count" id="count-queued">0</span></div>
+          <div class="column-cards" id="cards-queued"></div>
+        </div>
+        <div class="board-column" id="col-claimed">
+          <div class="column-header">Claimed (Active Lease) <span class="count" id="count-claimed">0</span></div>
+          <div class="column-cards" id="cards-claimed"></div>
+        </div>
+        <div class="board-column" id="col-done">
+          <div class="column-header">Done <span class="count" id="count-done">0</span></div>
+          <div class="column-cards" id="cards-done"></div>
+        </div>
+        <div class="board-column" id="col-failed">
+          <div class="column-header">Failed <span class="count" id="count-failed">0</span></div>
+          <div class="column-cards" id="cards-failed"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Panel 3: Memory Timeline & Rules -->
+    <section class="panel" id="panel-memory">
+      <div class="panel-header">
+        <div class="panel-title">
+          <span class="icon">🧠</span> 3. Team Memory & Procedural Rules
+        </div>
+        <div class="panel-actions">
+          <span class="badge badge-success" id="active-rules-count">0 Rules</span>
+        </div>
+      </div>
+      <div class="panel-body memory-container">
+        <div class="memory-section">
+          <h4>Active Procedural Rules (Librarian Consolidations)</h4>
+          <div id="rules-list" class="rules-list">
+            <div class="empty-state">No rules consolidated yet. Dismiss or escalate alerts below to train the agent.</div>
+          </div>
+        </div>
+        <div class="memory-section">
+          <h4>Semantic Facts (Supersession Chain)</h4>
+          <div id="facts-list" class="facts-list"></div>
+        </div>
+        <div class="memory-section">
+          <h4>Recent Episodic Feedback</h4>
+          <div id="episodes-list" class="episodes-timeline"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Panel 4: Ranked Alerts & AI Analyst -->
+    <section class="panel" id="panel-alerts">
+      <div class="panel-header">
+        <div class="panel-title">
+          <span class="icon">🎯</span> 4. Personalized Alerts & Analyst Agent
+        </div>
+        <div class="tabs">
+          <button class="tab-btn active" id="tab-btn-alerts" onclick="switchAlertTab('alerts')">Ranked Alerts</button>
+          <button class="tab-btn" id="tab-btn-analyst" onclick="switchAlertTab('analyst')">Analyst Plan</button>
+          <button class="tab-btn" id="tab-btn-chat" onclick="switchAlertTab('chat')">Team Chat</button>
+        </div>
+      </div>
+      <div class="panel-body alerts-container">
+        <!-- Sub-view: Alerts -->
+        <div id="view-alerts" class="tab-view active">
+          <div id="alerts-list" class="alerts-list"></div>
+        </div>
+
+        <!-- Sub-view: Analyst Agent -->
+        <div id="view-analyst" class="tab-view">
+          <div class="analyst-controls">
+            <button id="btn-run-analyst" class="btn btn-primary" onclick="runAnalystPlan()">
+              ⚡ Run Autonomous Analyst Remediation Plan
+            </button>
+          </div>
+          <div id="analyst-trace" class="analyst-trace">
+            <div class="empty-state">Click button above to trigger tool calling trace across Graph algorithms.</div>
+          </div>
+        </div>
+
+        <!-- Sub-view: Chat -->
+        <div id="view-chat" class="tab-view">
+          <div class="chat-messages" id="chat-messages">
+            <div class="chat-bubble assistant">
+              Hello! I am Ripple's tenant brain for your committee. Ask me about blast radius, active procedural rules, or why any alert is ranked with a specific score.
+            </div>
+          </div>
+          <form class="chat-input-bar" id="chat-form" onsubmit="sendChatMessage(event)">
+            <input type="text" id="chat-input" class="text-input" placeholder="e.g. Why is this alert ranked low?" autocomplete="off" />
+            <button type="submit" class="btn btn-primary">Send</button>
+          </form>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Submit Retraction Modal -->
+  <div id="modal-submit" class="modal hidden">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3>Submit Retraction Notice</h3>
+        <button class="btn-close" onclick="closeSubmitModal()">×</button>
+      </div>
+      <form id="form-retraction" onsubmit="submitRetractionNotice(event)">
+        <div class="form-group">
+          <label>Retraction ID:</label>
+          <input type="text" id="sub-ret-id" class="text-input" value="SYN-RET-099" required />
+        </div>
+        <div class="form-group">
+          <label>Target Trial ID:</label>
+          <input type="text" id="sub-trial-id" class="text-input" value="SYN-TR-0001" required />
+        </div>
+        <div class="form-group">
+          <label>Reason Category:</label>
+          <select id="sub-category" class="select-input">
+            <option value="fabrication">Fabrication (Highest Severity)</option>
+            <option value="error">Methodological Error</option>
+            <option value="administrative">Administrative Notice (Lowest)</option>
+            <option value="unknown">Unknown / Author Notice</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Notice Summary:</label>
+          <textarea id="sub-reason" class="text-input" rows="3" required>Patient inclusion data fabrication discovered by institutional audit committee.</textarea>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" onclick="closeSubmitModal()">Cancel</button>
+          <button type="submit" class="btn btn-primary">Submit to Queue</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Medical Disclaimer Footer -->
+  <footer class="app-footer">
+    <div class="disclaimer-badge">MEDICAL DECISION SUPPORT DISCLAIMER</div>
+    <p>
+      Ripple is an automated decision-support and evidence-tracing tool intended solely for administrative and methodological human review.
+      <strong>Ripple does not recommend changing clinical practice, making patient treatment decisions, or alleging academic misconduct.</strong>
+      All retraction categorizations reflect only stated published notices. All organizational data is synthetic.
+    </p>
+    <div class="footer-meta">
+      <span>FalkorDB v4.22+ Native Graph Engine</span>
+      <span>•</span>
+      <span>Track 02 (Agent Memory & Coordination) | Track 03 (Company Brain) | Track 01 (Connected Data)</span>
+    </div>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

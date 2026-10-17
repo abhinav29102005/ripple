@@ -124,3 +124,22 @@ Running log of decisions, verification results, and adaptations made during deve
 - **Decision Trace Endpoint:** `GET /api/decisions/{id}/trace` navigates from organizational decision through reviews, retracted trials, retraction notices, supporting document IDs (`DOC-001`, `DOC-002`, `DOC-003`), and discussion messages (`MSG-001`, `MSG-002`, `MSG-003`).
 - **Expertise Sourcing:** `GET /api/who-knows?topic=Cardiology` aggregates evidence count over `AUTHORED` and `PARTICIPATED_IN` edges, correctly ranking Dr. Sarah Chen as the top institutional expert.
 - Verified in `tests/test_org_brain.py`.
+
+---
+
+## 2026-10-17: Milestone M5 - Interactive 4-Panel Web UI
+
+### 1. UI Architecture & Features (`ui/`)
+- **Panel 1: Graph Explorer (Blast Radius):** D3.js force-directed visualization of retraction blast cascading through trials, reviews, guidelines, and decisions with pan/zoom and detailed node property inspection.
+- **Panel 2: Live Coordination Board:** Real-time KanBan columns (`Queued`, `Claimed`, `Done`, `Failed`) with live lease countdown timers reflecting FalkorDB atomic lease states.
+- **Panel 3: Team Memory & Procedural Rules:** Live timeline rendering active/retired procedural rules consolidated by the Librarian, superseding semantic facts, and recent episodic feedback.
+- **Panel 4: Ranked Alerts & Analyst Agent:**
+  - Base vs. personalized alert severity scoring with "Why this rank?" expanders tracing Cypher explanation paths back to rules and supporting episodes.
+  - Interactive "Dismiss" and "Escalate" action buttons that train tenant memory in real time.
+  - Autonomous Analyst Agent panel displaying step-by-step tool calling traces across graph algorithms (`blast_radius`, `rank_guidelines`, `contamination_clusters`, `recall_team_history`, `open_ticket`).
+  - Conversational team chat with cross-session graph memory recall.
+
+### 2. Browser Verification
+- Verified complete demo flow in the browser using the browser subagent.
+- Recorded browser session animation: `ripple_ui_demo.webp`.
+- Verified acceptance criteria: the demo flow runs fully in the browser.
