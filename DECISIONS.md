@@ -143,3 +143,31 @@ Running log of decisions, verification results, and adaptations made during deve
 - Verified complete demo flow in the browser using the browser subagent.
 - Recorded browser session animation: `ripple_ui_demo.webp`.
 - Verified acceptance criteria: the demo flow runs fully in the browser.
+
+---
+
+## 2026-10-17: Milestone M6 - Track 01 Connected Data & MCP Analyst
+
+### 1. MCP Server Implementation (`mcp_server.py`)
+- Standard Model Context Protocol tools exposed via Python MCP SDK:
+  - `blast_radius`: Multi-hop evidence traversal with node ID citations.
+  - `path_to_decision`: Shortest evidence path to clinical decision using `algo.SPpaths`.
+  - `rank_guidelines`: Evidence criticality using `algo.pageRank`.
+  - `contamination_clusters`: Non-independent evidence clusters using `algo.WCC`.
+  - `recall_team_history`: Procedural rules and facts from tenant memory.
+  - `recompute_pooled_effect`: Before-and-after meta-analysis pooling.
+  - `who_knows`: Sourced expertise discovery.
+  - `open_ticket`, `flag_decision`: Graph write operations.
+  - `claim_task`, `complete_task`: External agent coordination primitives.
+
+### 2. Autonomous Analyst Agent (`analyst.py`)
+- System prompt enforces concise tool invocation, mandatory node ID citations, and medical-safety compliance (no direct treatment changes).
+- Deterministic fallback plan executes:
+  1. `blast_radius`
+  2. `rank_guidelines` (PageRank)
+  3. `contamination_clusters` (WCC)
+  4. `recall_team_history`
+  5. `path_to_decision` (SPpaths)
+  6. `open_ticket`
+- Every tool call is logged with inputs and outputs for visible UI traces.
+- Acceptance criteria verified: `"What should we do first?"` generates complete execution trace, built-in algorithm outputs, and an opened incident ticket. Verified in `tests/test_analyst_mcp.py`.

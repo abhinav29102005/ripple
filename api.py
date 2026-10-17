@@ -1,3 +1,4 @@
+from analyst import AnalystAgent
 """
 FastAPI REST API for Ripple.
 Exposes endpoints for retraction submissions, task board status,
@@ -301,82 +302,16 @@ def chat_endpoint(req: ChatRequest):
 
 @app.post("/api/analyst")
 def analyst_endpoint(req: AnalystRequest):
-    knowledge = KnowledgeEngine(graph_manager.get_graph("knowledge"))
-    mem = TenantMemory(req.tenant)
-
-    # Deterministic Analyst Tool Call Trace
-    tool_trace = []
-
-    # Step 1: blast_radius
-    blast = knowledge.get_blast_radius(req.retraction_id)
-    tool_trace.append({
-        "step": 1,
-        "tool": "blast_radius",
-        "args": {"retraction_id": req.retraction_id},
-        "output": f"Traversed {len(blast)} review linkages. Retracted trial affects reviews: {[b['review'] for b in blast]}",
-    })
-
-    # Step 2: rank_guidelines
-    guidelines = knowledge.rank_guidelines_pagerank()
-    top_gl = guidelines[0]["id"] if guidelines else "SYN-GL-001"
-    tool_trace.append({
-        "step": 2,
-        "tool": "rank_guidelines",
-        "args": {"limit": 3},
-        "output": f"Critical guideline identified via PageRank: {top_gl} (score: {guidelines[0]['score'] if guidelines else 1.0})",
-    })
-
-    # Step 3: contamination_clusters
-    clusters = knowledge.build_contamination_clusters()
-    tool_trace.append({
-        "step": 3,
-        "tool": "contamination_clusters",
-        "args": {"retraction_id": req.retraction_id},
-        "output": f"Identified {len(clusters)} review pairs sharing retracted trials (non-independent evidence)",
-    })
-
-    # Step 4: recall_team_history
-    rules = mem.get_active_rules()
-    tool_trace.append({
-        "step": 4,
-        "tool": "recall_team_history",
-        "args": {"tenant": req.tenant},
-        "output": f"Recalled {len(rules)} active procedural rules from tenant memory",
-    })
-
-    # Step 5: open_ticket for top affected decision
-    at_risk = knowledge.get_at_risk_decisions(req.retraction_id)
-    target_dec = at_risk[0]["decision_id"] if at_risk else "DEC-CARDIO-001"
-    ticket_id = f"TCK-ANALYST-{int(time.time())}"
-    knowledge.graph.query("""
-    MATCH (dec:Decision {id: $did})
-    CREATE (tck:Ticket {id: $tid, title: $title, status: 'open', priority: 'high', synthetic: true})
-    MERGE (tck)-[:TRACKS]->(dec)
-    """, {
-        "did": target_dec,
-        "tid": ticket_id,
-        "title": f"URGENT: Re-evaluate {target_dec} following retraction {req.retraction_id}",
-    })
-    tool_trace.append({
-        "step": 5,
-        "tool": "open_ticket",
-        "args": {"decision_id": target_dec, "priority": "high"},
-        "output": f"Created incident ticket {ticket_id} tracking decision {target_dec}",
-    })
-
-    summary = (
-        f"Analyst Recommendation for {req.retraction_id}:\n"
-        f"1. Priority action: Review flagged decision [{target_dec}] informing critical guideline [{top_gl}].\n"
-        f"2. Evidence contamination: {len(clusters)} review clusters share the retracted trial.\n"
-        f"3. Ticket {ticket_id} has been opened for clinical review."
-    )
-
+    agent = AnalystAgent(req.tenant)
+    res = agent.execute_plan(req.retraction_id, req.prompt or "What should we do first?")
     return {
         "retraction_id": req.retraction_id,
         "tenant": req.tenant,
-        "tool_trace": tool_trace,
-        "recommendation": summary,
-        "ticket_created": ticket_id,
+        "tool_trace": res["trace"],
+        "recommendation": res["recommendation"],
+        "ticket_created": res["ticket_id"],
+        "target_decision_id": res["target_decision_id"],
+        "algorithms_used": res["algorithms_used"],
     }
 
 # --- Mount Static UI ---
