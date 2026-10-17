@@ -171,3 +171,27 @@ Running log of decisions, verification results, and adaptations made during deve
   6. `open_ticket`
 - Every tool call is logged with inputs and outputs for visible UI traces.
 - Acceptance criteria verified: `"What should we do first?"` generates complete execution trace, built-in algorithm outputs, and an opened incident ticket. Verified in `tests/test_analyst_mcp.py`.
+
+---
+
+## 2026-10-17: Milestone M7 - Proof, Benchmarks & Polish
+
+### 1. High-Concurrency Stress Benchmark (`scripts/bench.py`)
+- Executed 16 concurrent worker processes claiming and completing 500 tasks with 20 concurrent tenant memory reader processes.
+- **Results:**
+  - Total tasks: 500
+  - Completed tasks: 500
+  - Double claims: **0**
+  - Throughput: **387.3 tasks/sec**
+  - Claim Latency: p50 = 9.11 ms, p95 = 29.11 ms
+  - Saved to `bench/latest.json` and served via `GET /api/bench/latest`.
+
+### 2. Chaos Worker Assassination (`scripts/chaos.py`)
+- Simulated hard worker death via SIGKILL (-9) on 2 workers mid-execution during a 200-task run.
+- Proved that FalkorDB leases expire (`lease_until <= $now`) and auto-reclaim back to `queued`.
+- Surviving workers claimed the reclaimed tasks and completed all 200 tasks.
+- **Results:** 200/200 done, 0 tasks lost, 0 double claims. Saved to `bench/chaos_latest.json`.
+
+### 3. Comprehensive Documentation & Polish
+- `README.md` updated with "Remove FalkorDB and What Breaks", Cypher query and algorithm references, per-track hero proofs, 3-act demo script, and medical-safety disclosure.
+- `scripts/reset.py` deterministic wipe and re-seed verified.

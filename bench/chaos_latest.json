@@ -1,0 +1,31 @@
+{
+  "experiment": "Chaos Worker Assassination (SIGKILL) & Self-Healing Leases",
+  "timestamp": "2026-10-17 18:50:10",
+  "total_tasks": 200,
+  "completed_tasks": 200,
+  "workers_killed": 2,
+  "tasks_lost": 0,
+  "timeline": [
+    {
+      "time": 0.0,
+      "event": "Launched 6 workers on 200 queued tasks"
+    },
+    {
+      "time": 0.403,
+      "event": "Worker 0 assassinated with SIGKILL (-9) while holding lease"
+    },
+    {
+      "time": 0.406,
+      "event": "Worker 1 assassinated with SIGKILL (-9) while holding lease"
+    },
+    {
+      "time": 2.607,
+      "event": "Self-healing: Reclaimed 2 stranded tasks from dead workers back to queue"
+    },
+    {
+      "time": 2.713,
+      "event": "Surviving workers finished all remaining tasks"
+    }
+  ],
+  "verdict": "PASS"
+}

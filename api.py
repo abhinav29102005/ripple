@@ -317,3 +317,21 @@ def analyst_endpoint(req: AnalystRequest):
 # --- Mount Static UI ---
 from fastapi.staticfiles import StaticFiles
 app.mount("/", StaticFiles(directory="ui", html=True), name="ui")
+
+# --- Benchmark & Chaos Telemetry Endpoints ---
+
+@app.get("/api/bench/latest")
+def get_bench_latest():
+    path = "bench/latest.json"
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="Benchmark not run yet")
+    with open(path) as f:
+        return json.load(f)
+
+@app.get("/api/bench/chaos")
+def get_chaos_latest():
+    path = "bench/chaos_latest.json"
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="Chaos experiment not run yet")
+    with open(path) as f:
+        return json.load(f)
