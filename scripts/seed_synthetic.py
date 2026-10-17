@@ -78,7 +78,14 @@ def seed_synthetic_data(scale: str = "standard", seed: int = 42) -> Dict[str, in
         rid = f"SYN-REV-{i:03d}"
         topic = TOPICS[(i - 1) % len(TOPICS)]
         # Map to 1-2 guidelines
-        g_idx = ((i - 1) % num_guidelines) + 1
+        primary_g = f"SYN-GL-{((i - 1) % num_guidelines) + 1:03d}"
+        g_ids = [primary_g]
+        if i == 7:
+            g_ids.append("SYN-GL-003")
+        elif i == 8:
+            g_ids.append("SYN-GL-001")
+        elif i == 10:
+            g_ids.append("SYN-GL-001")
         review_batch.append({
             "id": rid,
             "title": f"Systematic Review of {topic} Therapeutics Vol {i} (SYN)",
@@ -86,7 +93,7 @@ def seed_synthetic_data(scale: str = "standard", seed: int = 42) -> Dict[str, in
             "model": "fixed",
             "synthetic": True,
             "topic": topic,
-            "guideline_id": f"SYN-GL-{g_idx:03d}",
+            "guideline_ids": g_ids,
         })
     g.query("""
     UNWIND $batch AS p
@@ -96,7 +103,8 @@ def seed_synthetic_data(scale: str = "standard", seed: int = 42) -> Dict[str, in
     MATCH (top:Topic {name: p.topic})
     MERGE (r)-[:ON]->(top)
     WITH r, p
-    MATCH (g:Guideline {id: p.guideline_id})
+    UNWIND p.guideline_ids AS gid
+    MATCH (g:Guideline {id: gid})
     MERGE (r)-[:INFORMS]->(g)
     """, {"batch": review_batch})
 

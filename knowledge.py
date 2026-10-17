@@ -247,22 +247,38 @@ class KnowledgeEngine:
     # --- Built-in Graph Algorithms ---
 
     def rank_guidelines_pagerank(self) -> List[Dict[str, Any]]:
-        """Compute PageRank on Guideline nodes informed by Reviews."""
-        query = 'CALL algo.pageRank("Guideline", "INFORMS") YIELD node, score RETURN node.id AS id, node.title AS title, score ORDER BY score DESC'
+        """Compute PageRank across the INFORMS evidence graph to measure guideline criticality."""
+        query = """
+        CALL algo.pageRank(null, "INFORMS") YIELD node, score
+        MATCH (g:Guideline) WHERE id(node) = id(g)
+        RETURN g.id AS id, g.title AS title, score
+        ORDER BY score DESC
+        """
         try:
             res = self.graph.query(query)
-            return [{"id": r[0], "title": r[1], "score": round(float(r[2]), 4)} for r in res.result_set]
+            if res.result_set:
+                return [{"id": r[0], "title": r[1], "score": round(float(r[2]), 4)} for r in res.result_set]
         except Exception:
-            # In-degree fallback
-            fb_query = 'MATCH (g:Guideline) OPTIONAL MATCH (rev:Review)-[:INFORMS]->(g) RETURN g.id, g.title, count(rev) AS score ORDER BY score DESC'
-            res = self.graph.query(fb_query)
-            return [{"id": r[0], "title": r[1], "score": float(r[2])} for r in res.result_set]
+            pass
+        fb_query = "MATCH (g:Guideline) OPTIONAL MATCH (rev:Review)-[:INFORMS]->(g) RETURN g.id, g.title, count(rev) AS score ORDER BY score DESC"
+        res = self.graph.query(fb_query)
+        return [{"id": r[0], "title": r[1], "score": float(r[2])} for r in res.result_set]
 
-    def get_wcc_clusters(self) -> Dict[int, List[str]]:
-        """Compute Weakly Connected Components across nodes."""
-        query = 'CALL algo.WCC() YIELD node, componentId RETURN node.id AS id, componentId'
+    def get_wcc_clusters(self, node_label: Optional[str] = "Review", rel_type: Optional[str] = "SHARES_TRIAL") -> Dict[int, List[str]]:
+        """Compute Weakly Connected Components across nodes, restricted by label and relationship type."""
+        cfg = {}
+        if node_label:
+            cfg["nodeLabels"] = [node_label]
+        if rel_type:
+            cfg["relationshipTypes"] = [rel_type]
+        if cfg:
+            query = "CALL algo.WCC($cfg) YIELD node, componentId RETURN node.id AS id, componentId"
+            params = {"cfg": cfg}
+        else:
+            query = "CALL algo.WCC() YIELD node, componentId RETURN node.id AS id, componentId"
+            params = {}
         try:
-            res = self.graph.query(query)
+            res = self.graph.query(query, params)
             clusters: Dict[int, List[str]] = {}
             for r in res.result_set:
                 cid = int(r[1])

@@ -3,7 +3,7 @@ services:
     image: falkordb/falkordb:latest
     container_name: ripple-falkordb
     ports:
-      - "6379:6379"
+      - "${FALKORDB_PORT:-6380}:6379"
       - "3000:3000"
     environment:
       - FALKORDB_DATA_PATH=/var/lib/falkordb/data

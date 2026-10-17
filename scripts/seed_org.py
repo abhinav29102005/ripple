@@ -1,55 +1,62 @@
 """
-Deterministic synthetic organization generator for Ripple (Track 03 Company Brain).
-Creates 12 people, 3 committees, 15 decisions, 20 documents, 30 messages, 10 tickets
-interconnected with synthetic reviews and guidelines.
+Deterministic synthetic organization generator for Track 03 (Company Brain).
+Generates People, Committees, Decisions, Documents, Messages, and Tickets
+connected to the scientific knowledge graph. Uses batched UNWIND queries for high performance.
 """
-import sys
-import os
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
 import time
-import random
+from typing import Dict, List
 from graph import graph_manager
 
 PEOPLE = [
-    {"id": "PER-001", "name": "Dr. Sarah Chen", "role": "Chief Medical Officer & Chair of Cardiology", "topic": "Cardiology"},
-    {"id": "PER-002", "name": "Dr. Marcus Vance", "role": "Senior Clinical Methodologist", "topic": "Cardiology"},
-    {"id": "PER-003", "name": "Dr. Elena Rostova", "role": "Head of Oncology Therapeutics", "topic": "Oncology"},
-    {"id": "PER-004", "name": "Dr. James Wilson", "role": "Director of Evidence Synthesis", "topic": "Methods"},
-    {"id": "PER-005", "name": "Dr. Priya Patel", "role": "Clinical Quality Lead", "topic": "Cardiology"},
-    {"id": "PER-006", "name": "Dr. Robert Lang", "role": "Lead Biostatistician", "topic": "Methods"},
-    {"id": "PER-007", "name": "Dr. Fatima Al-Mansoor", "role": "Oncology Safety Lead", "topic": "Oncology"},
-    {"id": "PER-008", "name": "Dr. Alexander Kim", "role": "Cardiovascular Research Fellow", "topic": "Cardiology"},
-    {"id": "PER-009", "name": "Dr. Hannah Schmidt", "role": "Systematic Reviewer", "topic": "Methods"},
-    {"id": "PER-010", "name": "Dr. Carlos Ortiz", "role": "Clinical Pharmacology Specialist", "topic": "Cardiology"},
-    {"id": "PER-011", "name": "Dr. David Brooks", "role": "Clinical Guidelines Coordinator", "topic": "Oncology"},
-    {"id": "PER-012", "name": "Dr. Maya Lin", "role": "Audit & Compliance Officer", "topic": "Methods"},
+    {"id": "PER-001", "name": "Dr. Sarah Chen", "role": "Chief of Cardiology & Guideline Chair", "email": "schen@hospital.org", "topics": ["Cardiology"]},
+    {"id": "PER-002", "name": "Dr. Marcus Vance", "role": "Senior Interventional Cardiologist", "email": "mvance@hospital.org", "topics": ["Cardiology"]},
+    {"id": "PER-003", "name": "Dr. Elena Rostova", "role": "Director of Medical Oncology", "email": "erostova@hospital.org", "topics": ["Oncology"]},
+    {"id": "PER-004", "name": "Dr. James Wilson", "role": "Clinical Trialist & Methodologist", "email": "jwilson@hospital.org", "topics": ["Immunology", "Cardiology"]},
+    {"id": "PER-005", "name": "Dr. Priya Patel", "role": "Head of Clinical Pharmacy & Formulary", "email": "ppatel@hospital.org", "topics": ["Cardiology", "Oncology"]},
+    {"id": "PER-006", "name": "Dr. Arthur Pendelton", "role": "Hospital Chief Medical Officer", "email": "apendelton@hospital.org", "topics": ["Neurology"]},
+    {"id": "PER-007", "name": "Dr. Rebecca Kim", "role": "Thoracic Oncology Lead", "email": "rkim@hospital.org", "topics": ["Oncology"]},
+    {"id": "PER-008", "name": "Dr. David Thorne", "role": "Vascular Surgery Section Chief", "email": "dthorne@hospital.org", "topics": ["Cardiology"]},
+    {"id": "PER-009", "name": "Dr. Maya Lin", "role": "Biostatistics Core Director", "email": "mlin@hospital.org", "topics": ["Infectious Disease"]},
+    {"id": "PER-010", "name": "Dr. Tariq Mansour", "role": "Internal Medicine Residency Director", "email": "tmansour@hospital.org", "topics": ["Cardiology"]},
+    {"id": "PER-011", "name": "Dr. Chloe Bennett", "role": "Clinical Pharmacology Fellow", "email": "cbennett@hospital.org", "topics": ["Oncology"]},
+    {"id": "PER-012", "name": "Dr. Samuel Green", "role": "Patient Safety Committee Chair", "email": "sgreen@hospital.org", "topics": ["Neurology"]},
 ]
 
 COMMITTEES = [
-    {"id": "COM-CARDIO", "name": "Cardiology Steering Committee", "lead": "PER-001", "members": ["PER-001", "PER-002", "PER-005", "PER-008", "PER-010"]},
-    {"id": "COM-ONCO", "name": "Oncology Practice Committee", "lead": "PER-003", "members": ["PER-003", "PER-007", "PER-011"]},
-    {"id": "COM-METHODS", "name": "Clinical Evidence & Methods Council", "lead": "PER-004", "members": ["PER-004", "PER-006", "PER-009", "PER-012"]},
+    {"id": "COM-CARDIO", "name": "Cardiology Steering Committee", "members": ["PER-001", "PER-002", "PER-005", "PER-008", "PER-010"]},
+    {"id": "COM-ONCO", "name": "Oncology Formulary Steering Committee", "members": ["PER-003", "PER-005", "PER-007", "PER-011"]},
+    {"id": "COM-SAFETY", "name": "Hospital Quality & Patient Safety Board", "members": ["PER-004", "PER-006", "PER-009", "PER-012", "PER-001"]},
 ]
 
 def seed_organization(seed: int = 42):
-    random.seed(seed)
-    g = graph_manager.init_knowledge_schema()
+    g = graph_manager.get_graph("knowledge")
     print("Seeding synthetic organization structure (People, Committees, Decisions, Docs, Chats)...")
 
     # 1. People
     g.query("""
-    UNWIND $people AS p
-    MERGE (n:Person {id: p.id})
-    SET n.name = p.name, n.role = p.role, n.synthetic = true
-    """, {"people": PEOPLE})
+    UNWIND $batch AS p
+    MERGE (per:Person {id: p.id})
+    SET per.name = p.name, per.role = p.role, per.email = p.email, per.synthetic = true
+    """, {"batch": PEOPLE})
 
-    # Link people to Topics for who-knows queries
+    # Planted co-authorships with topics
+    pub_batch = []
     for p in PEOPLE:
-        g.query("""
-        MATCH (person:Person {id: $pid}), (top:Topic {name: $topic})
-        MERGE (person)-[:AUTHORED]->(top)
-        """, {"pid": p["id"], "topic": p["topic"]})
+        for top_name in p["topics"]:
+            pub_batch.append({
+                "pid": p["id"],
+                "tname": top_name,
+                "doc_id": f"DOC-PUB-{p['id']}-{top_name[:3].upper()}",
+                "doc_title": f"Investigative Analysis in {top_name} by {p['name']} (SYN)",
+            })
+    g.query("""
+    UNWIND $batch AS p
+    MATCH (per:Person {id: p.pid}), (top:Topic {name: p.tname})
+    MERGE (doc:Document {id: p.doc_id})
+    SET doc.title = p.doc_title, doc.kind = 'primary_research', doc.synthetic = true
+    MERGE (per)-[:AUTHORED]->(doc)
+    MERGE (doc)-[:ABOUT]->(top)
+    """, {"batch": pub_batch})
 
     # 2. Committees & Membership
     for com in COMMITTEES:
@@ -75,7 +82,7 @@ def seed_organization(seed: int = 42):
     MERGE (c)-[:OWNS]->(g)
     """)
 
-    # Planted Authorship: Dr. Sarah Chen authored SYN-REV-001 (crucial deliberate pattern)
+    # Planted Authorship
     g.query("""
     MATCH (p:Person {id: 'PER-001'}), (rev:Review {id: 'SYN-REV-001'})
     MERGE (p)-[:AUTHORED]->(rev)
@@ -85,8 +92,7 @@ def seed_organization(seed: int = 42):
     MERGE (p)-[:AUTHORED]->(rev)
     """)
 
-    # 3. Decisions (15 decisions)
-    # Planted Decision 1: DEC-CARDIO-001 based on SYN-REV-001 & SYN-REV-002
+    # 3. Decisions
     decisions = [
         {
             "id": "DEC-CARDIO-001",
@@ -120,7 +126,6 @@ def seed_organization(seed: int = 42):
         },
     ]
 
-    # Add remaining decisions up to 15
     for i in range(4, 16):
         com = "COM-CARDIO" if i % 2 == 0 else "COM-ONCO"
         gid = "SYN-GL-001" if i % 2 == 0 else "SYN-GL-002"
@@ -136,31 +141,34 @@ def seed_organization(seed: int = 42):
             "participants": ["PER-001", "PER-002"] if i % 2 == 0 else ["PER-003", "PER-004"],
         })
 
-    for d in decisions:
-        g.query("""
-        MERGE (dec:Decision {id: $id})
-        SET dec.title = $title, dec.date = $date, dec.status = $status, dec.synthetic = true
-        WITH dec
-        MATCH (c:Committee {id: $com_id})
-        MERGE (dec)-[:MADE_BY]->(c)
-        WITH dec
-        MATCH (g:Guideline {id: $gid})
-        MERGE (dec)-[:ABOUT]->(g)
-        """, {"id": d["id"], "title": d["title"], "date": d["date"], "status": d["status"], "com_id": d["committee"], "gid": d["guideline"]})
+    dec_nodes = [{"id": d["id"], "title": d["title"], "date": d["date"], "status": d["status"], "com_id": d["committee"], "gid": d["guideline"]} for d in decisions]
+    g.query("""
+    UNWIND $batch AS p
+    MERGE (dec:Decision {id: p.id})
+    SET dec.title = p.title, dec.date = p.date, dec.status = p.status, dec.synthetic = true
+    WITH dec, p
+    MATCH (c:Committee {id: p.com_id})
+    MERGE (dec)-[:MADE_BY]->(c)
+    WITH dec, p
+    MATCH (g:Guideline {id: p.gid})
+    MERGE (dec)-[:ABOUT]->(g)
+    """, {"batch": dec_nodes})
 
-        # Link Reviews
-        for rid in d["reviews"]:
-            g.query("""
-            MATCH (dec:Decision {id: $did}), (r:Review {id: $rid})
-            MERGE (dec)-[:BASED_ON]->(r)
-            """, {"did": d["id"], "rid": rid})
+    # Link Reviews & Participants in batches
+    dec_rev_links = [{"did": d["id"], "rid": rid} for d in decisions for rid in d["reviews"]]
+    g.query("""
+    UNWIND $batch AS p
+    MATCH (dec:Decision {id: p.did}), (r:Review {id: p.rid})
+    MERGE (dec)-[:BASED_ON]->(r)
+    MERGE (r)-[:SUPPORTS]->(dec)
+    """, {"batch": dec_rev_links})
 
-        # Link Participants
-        for pid in d["participants"]:
-            g.query("""
-            MATCH (dec:Decision {id: $did}), (p:Person {id: $pid})
-            MERGE (p)-[:PARTICIPATED_IN]->(dec)
-            """, {"did": d["id"], "pid": pid})
+    dec_part_links = [{"did": d["id"], "pid": pid} for d in decisions for pid in d["participants"]]
+    g.query("""
+    UNWIND $batch AS p
+    MATCH (dec:Decision {id: p.did}), (per:Person {id: p.pid})
+    MERGE (per)-[:PARTICIPATED_IN]->(dec)
+    """, {"batch": dec_part_links})
 
     # 4. Documents (20 documents)
     documents = [
@@ -178,14 +186,14 @@ def seed_organization(seed: int = 42):
             "decision": target_dec,
         })
 
-    for doc in documents:
-        g.query("""
-        MERGE (d:Document {id: $id})
-        SET d.kind = $kind, d.title = $title, d.synthetic = true
-        WITH d
-        MATCH (dec:Decision {id: $dec_id})
-        MERGE (d)-[:SUPPORTS]->(dec)
-        """, {"id": doc["id"], "kind": doc["kind"], "title": doc["title"], "dec_id": doc["decision"]})
+    g.query("""
+    UNWIND $batch AS p
+    MERGE (d:Document {id: p.id})
+    SET d.kind = p.kind, d.title = p.title, d.synthetic = true
+    WITH d, p
+    MATCH (dec:Decision {id: p.decision})
+    MERGE (d)-[:SUPPORTS]->(dec)
+    """, {"batch": documents})
 
     # 5. Messages (30 messages)
     messages = [
@@ -204,13 +212,16 @@ def seed_organization(seed: int = 42):
 
     now = int(time.time())
     for m in messages:
-        g.query("""
-        MERGE (msg:Message {id: $id})
-        SET msg.channel = $channel, msg.text = $text, msg.ts = $ts, msg.synthetic = true
-        WITH msg
-        MATCH (dec:Decision {id: $dec_id})
-        MERGE (msg)-[:MENTIONS]->(dec)
-        """, {"id": m["id"], "channel": m["channel"], "text": m["text"], "ts": now, "dec_id": m["decision"]})
+        m["ts"] = now
+
+    g.query("""
+    UNWIND $batch AS p
+    MERGE (msg:Message {id: p.id})
+    SET msg.channel = p.channel, msg.text = p.text, msg.ts = p.ts, msg.synthetic = true
+    WITH msg, p
+    MATCH (dec:Decision {id: p.decision})
+    MERGE (msg)-[:MENTIONS]->(dec)
+    """, {"batch": messages})
 
     # 6. Tickets (10 tickets)
     tickets = [
@@ -227,14 +238,14 @@ def seed_organization(seed: int = 42):
             "decision": target_dec,
         })
 
-    for t in tickets:
-        g.query("""
-        MERGE (tck:Ticket {id: $id})
-        SET tck.title = $title, tck.status = $status, tck.priority = $priority, tck.synthetic = true
-        WITH tck
-        MATCH (dec:Decision {id: $dec_id})
-        MERGE (tck)-[:TRACKS]->(dec)
-        """, {"id": t["id"], "title": t["title"], "status": t["status"], "priority": t["priority"], "dec_id": t["decision"]})
+    g.query("""
+    UNWIND $batch AS p
+    MERGE (tck:Ticket {id: p.id})
+    SET tck.title = p.title, tck.status = p.status, tck.priority = p.priority, tck.synthetic = true
+    WITH tck, p
+    MATCH (dec:Decision {id: p.decision})
+    MERGE (tck)-[:TRACKS]->(dec)
+    """, {"batch": tickets})
 
     print("Synthetic organization successfully seeded and connected to evidence graph!")
 

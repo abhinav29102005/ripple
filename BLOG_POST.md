@@ -30,7 +30,7 @@ Many agent architectures treat the database as a dumb key-value store or vector 
        t.lease_until = $now + $lease, t.attempts = t.attempts + 1
    RETURN t.id, t.payload
    ```
-   Under stress testing with **16 concurrent worker processes claiming 500 tasks**, FalkorDB delivered **387.3 tasks/second with exactly ZERO double-claims** (p50 latency: 9.1ms).
+   Under stress testing with **16 concurrent worker processes claiming 500 tasks**, FalkorDB delivered **364.2 tasks/second with exactly ZERO double-claims** (p50 latency: 9.74ms).
 
 2. **Self-Healing Leases Under Chaos:**  
    When agents crash, their leases expire (`lease_until <= $now`). An automated background reclaimer query resets abandoned tasks back to `queued`. In our chaos engineering suite (`scripts/chaos.py`), we assassinated 2 active workers mid-execution with `SIGKILL (-9)`; the remaining workers reclaimed the stranded tasks and completed 100% of the workload (200/200) with **zero lost tasks**.
@@ -107,10 +107,10 @@ Ripple features a high-density, real-time command center:
 | Metric | Result | Target Requirement |
 |---|---|---|
 | **Claim Concurrency (16 workers, 500 tasks)** | **0 double-claims** | Exactly 0 |
-| **Claim Throughput** | **387.3 tasks/sec** | > 100 tasks/sec |
-| **Claim Latency (p50 / p95)** | **9.11 ms / 29.11 ms** | < 50 ms |
+| **Claim Throughput** | **364.2 tasks/sec** | > 100 tasks/sec |
+| **Claim Latency (p50 / p95)** | **9.74 ms / 35.51 ms** | < 50 ms |
 | **Chaos Worker Assassination (`kill -9`)** | **200/200 done (0 lost)** | 100% completion |
-| **Automated Unit & Integration Tests** | **23 passed / 0 failed** | 100% passing |
+| **Automated Unit & Integration Tests** | **28 passed / 0 failed** | 100% passing |
 | **Tenant Isolation** | **0 cross-tenant leaks** | Strict isolation |
 
 ---

@@ -20,7 +20,10 @@ class LibrarianHandler:
 
         for ep in episodes:
             if ep.get("reason"):
-                feature_episodes[("reason", str(ep["reason"]).lower())].append(ep)
+                r_val = str(ep["reason"]).lower()
+            if r_val in ("data_falsification", "falsification"):
+                r_val = "fabrication"
+            feature_episodes[("reason", r_val)].append(ep)
             if ep.get("weight_bucket"):
                 feature_episodes[("weight_bucket", str(ep["weight_bucket"]).lower())].append(ep)
             if "flips" in ep:

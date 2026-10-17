@@ -98,7 +98,8 @@ def test_lease_expiry_and_reclaim():
 def _multi_worker_runner(worker_num, total_expected, out_queue):
     from falkordb import FalkorDB
     from coord import CoordEngine
-    db = FalkorDB(host="localhost", port=6379)
+    from config import settings
+    db = FalkorDB(host=settings.falkordb_host, port=settings.falkordb_port)
     coord = CoordEngine(db.select_graph("test_coord"))
     agent_id = f"worker_{worker_num}"
     coord.register_agent(agent_id, "dummy_worker")
@@ -177,7 +178,8 @@ def test_16_workers_500_tasks_zero_double_claims():
 def _crash_worker(task_id, ready_event):
     from falkordb import FalkorDB
     from coord import CoordEngine
-    db = FalkorDB(host="localhost", port=6379)
+    from config import settings
+    db = FalkorDB(host=settings.falkordb_host, port=settings.falkordb_port)
     coord = CoordEngine(db.select_graph("test_coord"))
     # Claim with a 1-second lease, signal ready, then simulate crash (exit immediately without completing)
     task = coord.claim_task("crashed_agent", task_type="crash_test", lease_seconds=1)

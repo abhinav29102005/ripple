@@ -18,7 +18,8 @@ from coord import CoordEngine
 from graph import graph_manager
 
 def _chaos_worker(worker_id: int, total_tasks: int, stop_timeout: float):
-    db = FalkorDB(host="localhost", port=6379)
+    from config import settings
+    db = FalkorDB(host=settings.falkordb_host, port=settings.falkordb_port)
     coord = CoordEngine(db.select_graph("coord"))
     agent_id = f"chaos_worker_{worker_id}"
     coord.register_agent(agent_id, "chaos_worker")

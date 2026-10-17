@@ -110,12 +110,14 @@ def contamination_clusters(retraction_id: str) -> Dict[str, Any]:
     """
     knowledge = _get_knowledge()
     pairs = knowledge.build_contamination_clusters()
-    wcc = knowledge.get_wcc_clusters()
+    wcc = knowledge.get_wcc_clusters(node_label="Review", rel_type="SHARES_TRIAL")
+    multi_node = {cid: nodes for cid, nodes in wcc.items() if len(nodes) > 1}
     return {
         "algorithm": "algo.WCC",
         "retraction_id": retraction_id,
         "shared_trial_pairs": pairs,
         "components": wcc,
+        "contaminated_clusters": multi_node,
         "cluster_count": len(wcc),
     }
 
@@ -216,4 +218,4 @@ def complete_task(task_id: str, agent_id: str, result_json: str) -> Dict[str, An
 
 if __name__ == "__main__":
     import asyncio
-    asyncio.run(mcp_server.run())
+    mcp_server.run()

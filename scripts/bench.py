@@ -20,7 +20,13 @@ from graph import graph_manager
 from memory import TenantMemory
 
 def _bench_worker(worker_id: int, total_tasks: int, out_queue: mp.Queue):
-    db = FalkorDB(host="localhost", port=6379)
+    from config import settings
+    kwargs = {}
+    if settings.falkordb_username:
+        kwargs["username"] = settings.falkordb_username
+    if settings.falkordb_password:
+        kwargs["password"] = settings.falkordb_password
+    db = FalkorDB(host=settings.falkordb_host, port=settings.falkordb_port, **kwargs)
     coord = CoordEngine(db.select_graph("coord"))
     agent_id = f"bench_worker_{worker_id:02d}"
     coord.register_agent(agent_id, "benchmark_worker")
@@ -57,7 +63,13 @@ def _bench_worker(worker_id: int, total_tasks: int, out_queue: mp.Queue):
     })
 
 def _tenant_reader(tenant_id: int, stop_event: mp.Event):
-    db = FalkorDB(host="localhost", port=6379)
+    from config import settings
+    kwargs = {}
+    if settings.falkordb_username:
+        kwargs["username"] = settings.falkordb_username
+    if settings.falkordb_password:
+        kwargs["password"] = settings.falkordb_password
+    db = FalkorDB(host=settings.falkordb_host, port=settings.falkordb_port, **kwargs)
     mem = TenantMemory(f"bench_tenant_{tenant_id:02d}")
     while not stop_event.is_set():
         try:
@@ -67,7 +79,7 @@ def _tenant_reader(tenant_id: int, stop_event: mp.Event):
         except Exception:
             pass
 
-def run_benchmark(num_tasks: int = 500, num_workers: int = 16, num_tenants: int = 20) -> Dict[str, Any]:
+def run_benchmark(num_tasks: int = 500, num_workers: int = 16, num_tenants: int = 20, out_file: str = "bench/latest.json") -> Dict[str, Any]:
     print(f"=== Starting Ripple Benchmark ({num_workers} workers, {num_tasks} tasks, {num_tenants} concurrent tenant graphs) ===")
 
     # Initialize coord schema
@@ -185,10 +197,17 @@ def run_benchmark(num_tasks: int = 500, num_workers: int = 16, num_tenants: int 
     print(f"Verdict: {'PASS' if results['pass'] else 'FAIL'}")
 
     os.makedirs("bench", exist_ok=True)
-    with open("bench/latest.json", "w") as f:
+    with open(out_file, "w") as f:
         json.dump(results, f, indent=2)
 
     return results
 
 if __name__ == "__main__":
-    run_benchmark()
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--tasks", type=int, default=500)
+    parser.add_argument("--workers", type=int, default=16)
+    parser.add_argument("--tenants", type=int, default=20)
+    parser.add_argument("--out", type=str, default="bench/latest.json")
+    args = parser.parse_args()
+    run_benchmark(num_tasks=args.tasks, num_workers=args.workers, num_tenants=args.tenants, out_file=args.out)

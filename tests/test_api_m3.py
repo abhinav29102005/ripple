@@ -81,3 +81,30 @@ def test_api_tenant_memory_and_rules():
     assert "base_score" in exp
     assert "final_score" in exp
     assert "rules_applied" in exp
+
+def test_public_mode_hardening(monkeypatch):
+    from config import settings
+    client = TestClient(app)
+
+    # Enable public mode
+    monkeypatch.setattr(settings, "public_mode", True)
+
+    # 1. Reset endpoint must return 403 Forbidden
+    res_reset = client.post("/api/reset")
+    assert res_reset.status_code == 403
+    assert "disabled in PUBLIC_MODE" in res_reset.json()["detail"]
+
+    # 2. Chaos endpoint must return 403 Forbidden
+    res_chaos = client.post("/api/chaos/run")
+    assert res_chaos.status_code == 403
+    assert "disabled in PUBLIC_MODE" in res_chaos.json()["detail"]
+
+    # 3. Rate limiting on chat endpoint (limit is 10)
+    for _ in range(10):
+        r = client.post("/api/chat", json={"tenant": "cardio_api", "text": "status check"})
+        assert r.status_code == 200
+
+    # 11th request must be rate-limited (429)
+    r_exceeded = client.post("/api/chat", json={"tenant": "cardio_api", "text": "status check"})
+    assert r_exceeded.status_code == 429
+    assert "Rate limit exceeded" in r_exceeded.json()["detail"]

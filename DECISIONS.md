@@ -53,7 +53,7 @@ Running log of decisions, verification results, and adaptations made during deve
 - **Decision:** All 3 core graph algorithms (PageRank for guideline criticality, WCC for review contamination clusters, SPpaths for decision-retraction blast paths) are fully native and verified in FalkorDB.
 
 ### 5. Port Configuration
-- Host port 6379 had a pre-existing container `mlsc-redis` which was stopped to allow FalkorDB to run on the standard port `6379`. Port is also configurable via `FALKORDB_PORT` in `.env`.
+- Host port 6380 is mapped to container port 6379 in `docker-compose.yml` (configurable via `FALKORDB_PORT` in `.env`) to prevent collisions with Redis instances on port 6379.
 
 ---
 

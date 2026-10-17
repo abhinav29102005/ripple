@@ -5,7 +5,9 @@ Exposes endpoints for retraction submissions, task board status,
 graph exploration, tenant memory, personalized alert rankings, and feedback.
 """
 from typing import Any, Dict, List, Optional
-from fastapi import FastAPI, HTTPException, Query, BackgroundTasks
+from fastapi import FastAPI, HTTPException, Query, BackgroundTasks, Request
+import time
+from collections import defaultdict
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -22,6 +24,24 @@ app = FastAPI(
     description="FalkorDB-Native Multi-Agent Coordination & Organizational Brain Engine",
     version="1.0.0",
 )
+
+
+RATE_LIMIT_WINDOW = 60  # seconds
+RATE_LIMIT_MAX_REQUESTS = 10  # max requests per window in public mode
+_ip_request_timestamps = defaultdict(list)
+
+def check_public_rate_limit(request: Request):
+    if not settings.public_mode:
+        return
+    client_ip = request.client.host if request.client else "unknown"
+    now = time.time()
+    _ip_request_timestamps[client_ip] = [ts for ts in _ip_request_timestamps[client_ip] if now - ts < RATE_LIMIT_WINDOW]
+    if len(_ip_request_timestamps[client_ip]) >= RATE_LIMIT_MAX_REQUESTS:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Rate limit exceeded ({RATE_LIMIT_MAX_REQUESTS} req/min). Public demo mode is active. Please wait a moment."
+        )
+    _ip_request_timestamps[client_ip].append(now)
 
 app.add_middleware(
     CORSMiddleware,
@@ -238,6 +258,27 @@ def get_contamination_clusters():
 
 # --- Chat & Analyst Endpoints ---
 
+
+@app.post("/api/reset")
+def reset_database():
+    if settings.public_mode:
+        raise HTTPException(
+            status_code=403,
+            detail="Resetting the database is disabled in PUBLIC_MODE to protect public demo integrity."
+        )
+    from scripts.reset import reset_all_graphs
+    reset_all_graphs()
+    return {"status": "ok", "message": "All graphs reset deterministically."}
+
+@app.post("/api/chaos/run")
+def trigger_chaos_experiment():
+    if settings.public_mode:
+        raise HTTPException(
+            status_code=403,
+            detail="Process assassination and chaos experiments are disabled in PUBLIC_MODE."
+        )
+    return {"status": "ok", "message": "Chaos experiment triggered."}
+
 class ChatRequest(BaseModel):
     tenant: str = "cardio"
     session: Optional[str] = None
@@ -249,7 +290,8 @@ class AnalystRequest(BaseModel):
     prompt: Optional[str] = "What should we do first about this retraction?"
 
 @app.post("/api/chat")
-def chat_endpoint(req: ChatRequest):
+def chat_endpoint(req: ChatRequest, request: Request):
+    check_public_rate_limit(request)
     mem = TenantMemory(req.tenant)
     session_id = req.session or mem.create_session()
     
@@ -301,7 +343,8 @@ def chat_endpoint(req: ChatRequest):
     }
 
 @app.post("/api/analyst")
-def analyst_endpoint(req: AnalystRequest):
+def analyst_endpoint(req: AnalystRequest, request: Request):
+    check_public_rate_limit(request)
     agent = AnalystAgent(req.tenant)
     res = agent.execute_plan(req.retraction_id, req.prompt or "What should we do first?")
     return {

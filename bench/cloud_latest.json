@@ -1,0 +1,15 @@
+{
+  "benchmark": "Ripple FalkorDB Coordination & Memory Throughput",
+  "timestamp": "2026-10-18 00:35:35",
+  "total_tasks": 50,
+  "completed_tasks": 50,
+  "db_verified_done": 50,
+  "workers": 4,
+  "concurrent_tenant_graphs": 5,
+  "duration_seconds": 33.637,
+  "throughput_tasks_per_sec": 1.5,
+  "double_claims": 0,
+  "claim_latency_p50_ms": 605.07,
+  "claim_latency_p95_ms": 1674.66,
+  "pass": true
+}

@@ -10,7 +10,7 @@
 [![FalkorDB](https://img.shields.io/badge/Graph_Database-FalkorDB%20v4.22+-E11D48?style=for-the-badge&logo=redis&logoColor=white)](https://falkordb.com)
 [![Python](https://img.shields.io/badge/Python-3.12%20|%203.14-3B82F6?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
 [![FastAPI](https://img.shields.io/badge/API-FastAPI-059669?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
-[![Tests](https://img.shields.io/badge/Tests-23%20Passed-10B981?style=for-the-badge)](tests/)
+[![Tests](https://img.shields.io/badge/Tests-28%20Passed-10B981?style=for-the-badge)](tests/)
 
 ---
 
@@ -48,7 +48,7 @@ FalkorDB is not an auxiliary cache in Ripple; it is the single authoritative sou
 ### Track 02: Agent Memory and Coordination (Primary Track)
 - **Why it qualifies:** Ripple implements a complete FalkorDB-native coordination engine with atomic task claiming, dependency-gated fan-out (`ingest -> trace -> (quantify x N) -> brief`), lease heartbeats, and self-healing recovery. It pairs coordination with procedural tenant memory (`Session -> Episode -> Rule -> Ranking`) where team feedback autonomously consolidates into scoring rules.
 - **Hero Proof:**
-  - **High Concurrency Benchmark:** 16 concurrent workers executing 500 tasks with **0 double-claims** at **312+ tasks/sec** (`scripts/bench.py`).
+  - **High Concurrency Benchmark:** 16 concurrent workers executing 500 tasks with **0 double-claims** at **364.2 tasks/sec (p50: 9.74ms, p95: 35.51ms)** (`scripts/bench.py`).
   - **Chaos Worker Assassination:** Two workers killed mid-run with `kill -9`; leases expire; tasks auto-reclaim and finish with **100% completion (200/200)** and **0 tasks lost** (`scripts/chaos.py`).
   - **Procedural Rule Consolidation:** 3 dismissals create an active rule ($\Delta = -0.3$) that shifts the next alert ranking and provides full explainability trees (`tests/test_memory.py`).
 
@@ -60,9 +60,13 @@ FalkorDB is not an auxiliary cache in Ripple; it is the single authoritative sou
   - Institutional Expertise Sourcing: `GET /api/who-knows?topic=Cardiology` aggregates evidence across authorship and committee participation to rank institutional experts.
 
 ### Track 01: Agents That Act on Connected Data
-- **Why it qualifies:** Implements an MCP (Model Context Protocol) Server exposing 10 tools that invoke built-in FalkorDB algorithms (`algo.pageRank`, `algo.WCC`, `algo.SPpaths`).
+- **Why it qualifies:** Implements an official Model Context Protocol (MCP) Server exposing 10 tools that invoke built-in FalkorDB algorithms (`algo.pageRank`, `algo.WCC`, `algo.SPpaths`), evidence traversals, and organizational ticketing.
+- **Dual Planning Modes:**
+  - **`LLM_MODE=on` (Autonomous Tool Selection):** Google Gemini (`gemini-2.0-flash` function-calling adapter in `llm.py`) receives live MCP tool definitions and dynamically chooses which tools to execute based on the user query.
+  - **`LLM_MODE=off` (Deterministic Graph Planner):** Fixed, reproducible graph-native planner that categorizes queries and dispatches specialized graph tool suites with zero external API dependencies.
 - **Hero Proof:**
-  - Asking `"What should we do first?"` triggers the autonomous `AnalystAgent`, generating a step-by-step tool execution trace, running PageRank to find critical guidelines, detecting contamination clusters, finding the shortest evidence path, and opening an incident ticket in the graph (`tests/test_analyst_mcp.py`).
+  - Asking questions like `"What should we do first?"`, `"Who knows about Cardiology?"`, or `"Which decisions are at risk?"` executes distinct multi-step tool call traces over an official Python MCP SDK `ClientSession` over `stdio` transport to `mcp_server.py`.
+  - Built-in algorithms identify top guidelines via PageRank, review contamination clusters via WCC, and shortest evidence paths (`tests/test_analyst_mcp.py`, `docs/analyst_transcripts.md`).
 
 ---
 
@@ -78,20 +82,41 @@ Ripple maintains three isolated graph namespaces in FalkorDB:
 | **Edges** | `(Task)-[:DEPENDS_ON]->(Task)`, `(Task)-[:SPAWNED]->(Task)` | Dependency gating and parent-child task tracking. |
 
 ### 4.2 `knowledge` Graph (Scientific Evidence & Institutional Brain)
-| Label | Properties | Description |
-|---|---|---|
-| `Trial` | `id, title, year, status, synthetic` | Clinical trials (`status`: `active` or `retracted`). |
-| `Review` | `id, title, year, model, synthetic` | Systematic reviews & meta-analyses. |
-| `Guideline` | `id, title, body_org, year, synthetic` | Clinical practice guidelines. |
-| `Retraction`| `id, date, reason, reason_category, notice_url, synthetic` | Retraction notices. |
-| `Impact` | `id, review_id, retraction_id, before, after, pct_change, flips, weight_share` | Pooled effect recalculations. |
-| `Person` | `id, name, role, synthetic` | Institutional clinicians and researchers. |
-| `Committee`| `id, name, synthetic` | Clinical steering and formulary committees. |
-| `Decision` | `id, title, date, status, risk_reason, synthetic` | Institutional decisions (`active` or `at_risk`). |
-| `Document` | `id, kind, title, synthetic` | Supporting policy briefs and committee minutes. |
-| `Message`  | `id, channel, text, ts, synthetic` | Internal communication threads. |
-| `Ticket`   | `id, title, status, priority, synthetic` | Tracking and remediation tickets. |
-| **Edges** | `(Retraction)-[:RETRACTS]->(Trial)`, `(Trial)-[:INCLUDED_IN {yi, sei}]->(Review)`, `(Review)-[:INFORMS]->(Guideline)`, `(Review)-[:SHARES_TRIAL]->(Review)`, `(Impact)-[:OF]->(Review)`, `(Decision)-[:BASED_ON]->(Review)`, `(Decision)-[:MADE_BY]->(Committee)`, `(Person)-[:MEMBER_OF]->(Committee)`, `(Document)-[:SUPPORTS]->(Decision)`, `(Message)-[:MENTIONS]->(Decision)`, `(Ticket)-[:TRACKS]->(Decision)` |
+| Label | Count | Key Properties | Description |
+|---|---|---|---|
+| `Trial` | 40 | `id, title, year, status, synthetic` | Clinical trials (`status`: `active` or `retracted`). |
+| `Review` | 10 | `id, title, year, model, synthetic` | Systematic reviews & meta-analyses. |
+| `Guideline` | 5 | `id, title, body_org, year, synthetic` | Clinical practice guidelines. |
+| `Retraction`| 4 | `id, date, reason, reason_category, notice_url, synthetic` | Retraction notices. |
+| `Topic` | 5 | `id, name` | Medical disease and therapeutic specialties. |
+| `Journal` | 5 | `id, name` | Academic medical publishing journals. |
+| `Person` | 12 | `id, name, role, email, synthetic` | Institutional clinicians, investigators, and chairs. |
+| `Committee`| 3 | `id, name, synthetic` | Steering, formulary, and safety oversight committees. |
+| `Decision` | 15 | `id, title, date, status, risk_reason, synthetic` | Institutional clinical & formulary policy decisions. |
+| `Document` | 34 | `id, kind, title, synthetic` | Formal guidelines, committee briefs, and policy documents. |
+| `Message`  | 30 | `id, channel, text, ts, synthetic` | Internal clinical committee chat threads. |
+| `Ticket`   | 10 | `id, title, status, priority, synthetic` | Incident remediation and audit tracking tickets. |
+| `Impact` | *dynamic* | `id, review_id, retraction_id, before, after, pct_change, flips, weight_share` | Post-retraction re-quantified effect sizes. |
+
+| Edge Relationship Type | Count | Exact Source & Target Nodes | Clinical / Institutional Purpose |
+|---|---|---|---|
+| `[:INCLUDED_IN]` | 80 | `(:Trial)-[:INCLUDED_IN {yi, sei}]->(:Review)` | Clinical trial evidence pooled into meta-analyses. |
+| `[:PUBLISHED_IN]` | 40 | `(:Trial)-[:PUBLISHED_IN]->(:Journal)` | Journal publication venue for clinical trials. |
+| `[:SUPPORTS]` | 36 | `(:Document)-[:SUPPORTS]->(:Decision)` (20)<br>`(:Review)-[:SUPPORTS]->(:Decision)` (16) | Evidence directly backing institutional policies. |
+| `[:PARTICIPATED_IN]` | 31 | `(:Person)-[:PARTICIPATED_IN]->(:Decision)` | Voting and consensus participants on committee decisions. |
+| `[:MENTIONS]` | 30 | `(:Message)-[:MENTIONS]->(:Decision)` | Internal chat dialogue referencing active policies. |
+| `[:ABOUT]` | 29 | `(:Decision)-[:ABOUT]->(:Guideline)` (15)<br>`(:Document)-[:ABOUT]->(:Topic)` (14) | Domain alignment to guidelines and topics. |
+| `[:BASED_ON]` | 16 | `(:Decision)-[:BASED_ON]->(:Review)` | Clinical meta-analyses establishing policy foundations. |
+| `[:AUTHORED]` | 16 | `(:Person)-[:AUTHORED]->(:Document)` (14)<br>`(:Person)-[:AUTHORED]->(:Review)` (2) | Authorship of clinical evidence and institutional documents. |
+| `[:ON]` | 15 | `(:Review)-[:ON]->(:Topic)` (10)<br>`(:Guideline)-[:ON]->(:Topic)` (5) | Medical specialty taxonomy linkage. |
+| `[:MADE_BY]` | 15 | `(:Decision)-[:MADE_BY]->(:Committee)` | Institutional committee governing policy decisions. |
+| `[:MEMBER_OF]` | 14 | `(:Person)-[:MEMBER_OF]->(:Committee)` | Clinician and executive committee rosters. |
+| `[:INFORMS]` | 13 | `(:Review)-[:INFORMS]->(:Guideline)` | Systematic evidence cited by clinical guidelines. |
+| `[:TRACKS]` | 10 | `(:Ticket)-[:TRACKS]->(:Decision)` | Audit and remediation ticketing on clinical decisions. |
+| `[:RETRACTS]` | 4 | `(:Retraction)-[:RETRACTS]->(:Trial)` | Retraction notice invalidating a clinical trial. |
+| `[:OWNS]` | 2 | `(:Committee)-[:OWNS]->(:Guideline)` | Committee with institutional ownership of guideline. |
+| `[:OF]` | *pipeline* | `(:Impact)-[:OF]->(:Review)` | Statistical delta tied to systematic review. |
+| `[:SHARES_TRIAL]` | *pipeline* | `(:Review)-[:SHARES_TRIAL {n}]->(:Review)` | Co-pooled retracted trial contamination edge. |
 
 ### 4.3 `tenant_<id>` Graph (Team Memory & Explainability)
 | Label | Properties | Description |
@@ -148,14 +173,16 @@ All Cypher queries are maintained as named constants across Ripple's modules:
   SET d.status = 'at_risk', d.risk_reason = 'retraction ' + r.id
   RETURN count(DISTINCT d) AS flagged
   ```
-- **Built-in PageRank Algorithm (Guideline Criticality):**
+- **Built-in PageRank Algorithm (Guideline Criticality across Bipartite Citations):**
   ```cypher
-  CALL algo.pageRank("Guideline", "INFORMS") YIELD node, score
-  RETURN node.id AS id, node.title AS title, score ORDER BY score DESC
+  CALL algo.pageRank(null, "INFORMS") YIELD node, score
+  MATCH (g:Guideline) WHERE id(node) = id(g)
+  RETURN g.id AS id, g.title AS title, score ORDER BY score DESC
   ```
-- **Built-in Weakly Connected Components (Contamination Clusters):**
+- **Built-in Weakly Connected Components (Restricted Contamination Clusters):**
   ```cypher
-  CALL algo.WCC() YIELD node, componentId
+  CALL algo.WCC({nodeLabels: ['Review'], relationshipTypes: ['SHARES_TRIAL']})
+  YIELD node, componentId
   RETURN node.id AS id, componentId
   ```
 - **Built-in Shortest Path (Evidence to Decision Trace):**
@@ -187,7 +214,18 @@ All Cypher queries are maintained as named constants across Ripple's modules:
 
 ---
 
-## 6. Quick Start & Local Setup
+## 6. Configuration & Environment Variables
+
+| Variable | Default | Description |
+|---|---|---|
+| `FALKORDB_HOST` | `localhost` | FalkorDB hostname or Cloud endpoint |
+| `FALKORDB_PORT` | `6380` | FalkorDB host port (mapped to container 6379, avoiding local Redis collisions) |
+| `LLM_MODE` | `off` | `off` (deterministic offline planner) or `on` (live Gemini function calling) |
+| `GEMINI_API_KEY`| *(empty)* | Google Gemini API key for `LLM_MODE=on` |
+| `PUBLIC_MODE` | `0` | Set `1` to enable public-demo hardening: disables `/api/reset` and `/api/chaos/run` (HTTP 403) and rate-limits LLM endpoints to 10 req/min (HTTP 429) |
+| `API_PORT` | `8000` | Port for FastAPI backend & web UI |
+
+## 7. Quick Start & Local Setup
 
 ### Prerequisites
 - Docker & Docker Compose
@@ -197,13 +235,14 @@ All Cypher queries are maintained as named constants across Ripple's modules:
 ```bash
 docker compose up -d
 ```
-*FalkorDB will be available on port 6379, and FalkorDB Browser on port 3000 (`http://localhost:3000`).*
+*FalkorDB will be available on host port 6380 (mapped to container 6379, configurable via `FALKORDB_PORT`), and FalkorDB Browser on port 3000 (`http://localhost:3000`).*
 
 ### 2. Install Dependencies
 ```bash
 uv venv
 source .venv/bin/activate
 uv pip install -r requirements.txt
+cp .env.example .env
 ```
 
 ### 3. Initialize & Reset Database Deterministically
@@ -215,7 +254,7 @@ python scripts/reset.py
 ```bash
 pytest -v tests/
 ```
-*All 23 unit, concurrency, isolation, and pipeline tests will execute.*
+*All 28 unit, concurrency, isolation, and pipeline tests will execute.*
 
 ### 5. Launch Ripple Web Application
 ```bash
@@ -225,7 +264,7 @@ Open your browser to: **`http://localhost:8000`**
 
 ---
 
-## 7. Demo Script (3-Act Walkthrough)
+## 8. Demo Script (3-Act Walkthrough)
 
 - **Act 1: Company Brain (60s):**
   1. Open dashboard at `http://localhost:8000`.
@@ -247,7 +286,7 @@ Open your browser to: **`http://localhost:8000`**
 
 ---
 
-## 8. Data Labeling & Integrity
+## 9. Data Labeling & Integrity
 
 - **Synthetic Data:** In accordance with Hackathon Rule 4, all generated trial data, reviews, guidelines, decisions, documents, and messages are synthetic, prefixed with `SYN-`, and flagged with property `synthetic: true`.
 - **Fictional Organization:** The hospital organization, committees, personnel names, and chat logs are entirely fictional.
@@ -255,7 +294,7 @@ Open your browser to: **`http://localhost:8000`**
 
 ---
 
-## 9. Medical Safety & Disclaimer
+## 10. Medical Safety & Disclaimer
 
 > **IMPORTANT MEDICAL NOTICE:**  
 > Ripple is an automated decision-support and evidence-tracing tool designed strictly for administrative, methodological, and institutional audit review.  
@@ -264,6 +303,6 @@ Open your browser to: **`http://localhost:8000`**
 
 ---
 
-## 10. AI Assistance Disclosure
+## 11. AI Assistance Disclosure
 
-Ripple was designed, architected, and pair-programmed with Google DeepMind's **Antigravity AI coding assistant**. Antigravity assisted in formulating FalkorDB Cypher queries, benchmarking high-concurrency multiprocessing routines, implementing statistical meta-analysis mathematical models, building the 4-panel web dashboard, and verifying all verification spikes (A through D). All architectural decisions, performance benchmarks, and adaptations are logged in [DECISIONS.md](file:///home/bigboyaks/Projects/ripple/DECISIONS.md).
+Design and specification drafted with Claude (Anthropic); implementation and testing with Antigravity (Google DeepMind). *(Note: User confirmation required)*. All architectural decisions, performance benchmarks, and adaptations are logged in [DECISIONS.md](DECISIONS.md).

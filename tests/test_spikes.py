@@ -90,7 +90,8 @@ def test_spike_d_algorithms():
 
 def _claim_worker(agent_id, results_queue):
     from falkordb import FalkorDB
-    db = FalkorDB(host="localhost", port=6379)
+    from config import settings
+    db = FalkorDB(host=settings.falkordb_host, port=settings.falkordb_port)
     g = db.select_graph("test_spike_b_coord")
     claimed = []
     

@@ -15,7 +15,12 @@ class GraphManager:
     @property
     def db(self) -> FalkorDB:
         if self._db is None:
-            self._db = FalkorDB(host=self.host, port=self.port)
+            kwargs = {}
+            if settings.falkordb_username:
+                kwargs["username"] = settings.falkordb_username
+            if settings.falkordb_password:
+                kwargs["password"] = settings.falkordb_password
+            self._db = FalkorDB(host=self.host, port=self.port, **kwargs)
         return self._db
 
     def get_graph(self, name: str) -> Graph:
