@@ -1,0 +1,16 @@
+services:
+  falkordb:
+    image: falkordb/falkordb:latest
+    container_name: ripple-falkordb
+    ports:
+      - "6379:6379"
+      - "3000:3000"
+    environment:
+      - FALKORDB_DATA_PATH=/var/lib/falkordb/data
+      - REDIS_ARGS=--save 10 1 --appendonly yes
+    volumes:
+      - falkordb_data:/var/lib/falkordb/data
+    restart: unless-stopped
+
+volumes:
+  falkordb_data:

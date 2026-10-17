@@ -1,0 +1,8 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+data/real/*.private
+bench/latest.json
+falkordb_data/
+.pytest_cache/

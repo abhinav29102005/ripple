@@ -1,0 +1,56 @@
+# RIPPLE: Architectural Decisions and Spike Results
+
+Running log of decisions, verification results, and adaptations made during development.
+
+---
+
+## 2026-10-17: Milestone M0 - Scaffold & Spikes
+
+### 1. Spike A: FalkorDB Persistence across Container Restarts
+- **Question:** Does data persist across container restarts with volume mounts, and what are the exact paths and configuration?
+- **Finding:** FalkorDB container image (`falkordb/falkordb:latest`) uses Redis 8 under the hood with default working directory `/var/lib/falkordb` and `FALKORDB_DATA_PATH=/var/lib/falkordb/data`.
+- **Implementation:**
+  - In `docker-compose.yml`, mount named volume `falkordb_data` to `/var/lib/falkordb/data`.
+  - Pass environment variable `REDIS_ARGS=--save 10 1 --appendonly yes`.
+  - Added `graph_manager.save_state()` helper invoking `BGSAVE` / `SAVE`.
+- **Verification Result:** PASS (`tests/spike_a.py`). Wrote test graph, triggered save, restarted container via `docker compose restart`, read back data intact.
+
+### 2. Spike B: Atomic Task Claim Under High Concurrency
+- **Question:** Does the single-query atomic claim query (Section 7.1) prevent race conditions and double claims under 16 concurrent processes claiming 500 tasks?
+- **Test setup:** 16 separate worker processes (`multiprocessing` with `spawn` context) claiming 500 queued dummy tasks in `coord_spike` graph.
+- **Verification Result:** PASS (`tests/spike_b.py`).
+  - Total tasks queued: 500
+  - Unique tasks claimed: 500 / 500
+  - Double claims: **0**
+  - Missed tasks: 0
+  - Throughput: **552.6 tasks/sec** (all 500 claimed in 0.90s across 16 workers)
+  - DB status verification: exactly 500 tasks set to `claimed`.
+- **Decision:** The Section 7.1 Cypher atomic claim query is 100% thread/process-safe on FalkorDB. No coordinator serialization or secondary compare-and-set locking fallback is required.
+
+### 3. Spike C: Cypher Features Compatibility
+- **Question:** Are all spec Cypher features supported in FalkorDB 4.22.1?
+- **Verification Results (`tests/spike_c_d.py`):**
+  - Index creation: `CREATE INDEX FOR (n:Label) ON (n.prop)` - **Supported**.
+  - `MERGE` with property maps & parameters: **Supported**.
+  - `SET n.prop = null` to delete a property: **Supported** (returns `None` on subsequent match).
+  - `OPTIONAL MATCH` + `collect(DISTINCT ...)` + `WITH ... WHERE`: **Supported**.
+  - Variable-length paths `[:A|B*1..3]`: **Supported**.
+  - Pattern predicates in `WHERE` (e.g. `WHERE (a)-[:REL]->(:Label)`): **Supported**.
+  - List parameters (`UNWIND $list`, `IN $list`): **Supported**.
+  - Empty graph deletion: calling `g.delete()` on a non-existent graph raises `ResponseError: Invalid graph operation on empty key`. Handled safely in `GraphManager.delete_graph()`.
+
+### 4. Spike D: Built-in Graph Algorithm Procedures
+- **Question:** What are the exact procedure names, signatures, and yield structures in FalkorDB?
+- **Discovery via `CALL dbms.procedures()`:**
+  - PageRank: `CALL algo.pageRank("NodeLabel", "RELATIONSHIP_TYPE") YIELD node, score RETURN node.id, score`
+    - Signature requires 2 arguments: `(label, relationship)`.
+    - Returns node object and floating-point score.
+  - Weakly Connected Components (WCC): `CALL algo.WCC() YIELD node, componentId`
+    - Returns node object and integer component/componentId identifier.
+  - Shortest Path: `CALL algo.SPpaths({sourceNode: a, targetNode: b}) YIELD path RETURN path`
+    - Takes map parameter with `sourceNode` and `targetNode` Node references.
+    - Yields path object (`falkordb.path.Path`) with `.nodes()` and `.edges()`.
+- **Decision:** All 3 core graph algorithms (PageRank for guideline criticality, WCC for review contamination clusters, SPpaths for decision-retraction blast paths) are fully native and verified in FalkorDB.
+
+### 5. Port Configuration
+- Host port 6379 had a pre-existing container `mlsc-redis` which was stopped to allow FalkorDB to run on the standard port `6379`. Port is also configurable via `FALKORDB_PORT` in `.env`.
