@@ -114,7 +114,24 @@ Multi-tenant isolation is enforced at the graph level (`tenant_cardio` vs `tenan
 > **Judge:** *"How does your agent memory differ from vector-based RAG?"*  
 > **Answer:** *"Vector RAG stores unstructured text snippets and retrieves by cosine similarity, which cannot guarantee rule enforcement or explainability. Ripple stores procedural rules as explicit graph nodes with measurable hit rates, delta adjustments, and provenance pointers to the exact feedback episodes that generated them. When an alert score is adjusted, the user can click 'Why?' and inspect the exact rule and historical episodes."*
 
+#### Exact Alert Base-Score Formula (`ranking.py::compute_base_score`)
+Alert severity begins with an empirical baseline score computed strictly from the retracted evidence parameters:
+
+$$\text{base} = 0.4 \times \text{reason\_w} + 0.3 \times \text{weight\_share} + 0.2 \times \text{flips} + 0.1 \times \min\left(\frac{\text{guideline\_count}}{3}, 1.0\right)$$
+
+Where:
+- **`reason_w`:** `fabrication` ($1.0$), `error` ($0.6$), `unknown` ($0.5$), `administrative` ($0.2$).
+- **`weight_share`:** Percentage weight of the retracted trial inside the systematic review meta-analysis ($\in [0.0, 1.0]$).
+- **`flips`:** $1.0$ if removing the retracted trial reverses effect direction or nullifies statistical significance ($p < 0.05 \rightarrow p \ge 0.05$); else $0.0$.
+- **`guideline_count`:** Number of institutional guidelines citing the review, normalized over a denominator of 3 ($\le 1.0$).
+
+**Worked Real Examples from `scripts/demo_two_teams.py`:**
+- **`SYN-REV-ADM` (administrative):** $\text{base} = 0.4(0.2) + 0.3(0.05) + 0.2(0.0) + 0.1(1/3) = 0.08 + 0.015 + 0.0333 = \mathbf{0.1283}$
+- **`SYN-REV-FAB` (fabrication):** $\text{base} = 0.4(1.0) + 0.3(0.05) + 0.2(0.0) + 0.1(1/3) = 0.40 + 0.015 + 0.0333 = \mathbf{0.4483}$
+
 #### Ranking Safety Invariants & Clinical Guardrails
+1. **Rule Adjustment Cap (`[-0.4, +0.4]`):** Even if an alert matches multiple consolidated down-ranking or up-ranking procedural rules, the total net adjustment is strictly capped at $\pm 0.4$. This guarantees that learned organizational heuristics can personalize prioritization but cannot overpower baseline empirical evidence weights.
+2. **Clinical Safety Floor ($\ge 0.5$) with Tie-Breaking:** Medical ethics demand that severe scientific infractions (such as data fabrication) or statistical reversals that invalidate clinical conclusions must never be suppressed by user dismissals. Regardless of how many downranking rules match, alerts where `reason == "fabrication"` or `flips == True` are bound by a hard floor of $0.5$. When the safety floor applies, ties are broken by base score ($\text{final} = 0.5 + 0.01 \times \text{base}$) so that critical alerts do not show a uniform $0.5$ and the higher empirical base score alert retains higher priority.
 1. **Rule Adjustment Cap (`[-0.4, +0.4]`):** Even if an alert matches multiple consolidated down-ranking or up-ranking procedural rules, the total net adjustment is strictly capped at $\pm 0.4$. This guarantees that learned organizational heuristics can personalize prioritization but cannot overpower baseline empirical evidence weights.
 2. **Clinical Safety Floor ($\ge 0.5$):** Medical ethics demand that severe scientific infractions (such as data fabrication) or statistical reversals that invalidate clinical conclusions must never be suppressed by user dismissals. Regardless of how many downranking rules match, alerts where `reason == "fabrication"` or `flips == True` are bound by a hard floor of $0.5$.
 

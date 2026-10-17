@@ -10,7 +10,7 @@
 [![FalkorDB](https://img.shields.io/badge/Graph_Database-FalkorDB%20v4.22+-E11D48?style=for-the-badge&logo=redis&logoColor=white)](https://falkordb.com)
 [![Python](https://img.shields.io/badge/Python-3.12%20|%203.14-3B82F6?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
 [![FastAPI](https://img.shields.io/badge/API-FastAPI-059669?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
-[![Tests](https://img.shields.io/badge/Tests-28%20Passed-10B981?style=for-the-badge)](tests/)
+[![Tests](https://img.shields.io/badge/Tests-32%20Passed-10B981?style=for-the-badge)](tests/)
 
 ---
 
@@ -62,8 +62,8 @@ FalkorDB is not an auxiliary cache in Ripple; it is the single authoritative sou
 ### Track 01: Agents That Act on Connected Data
 - **Why it qualifies:** Implements an official Model Context Protocol (MCP) Server exposing 10 tools that invoke built-in FalkorDB algorithms (`algo.pageRank`, `algo.WCC`, `algo.SPpaths`), evidence traversals, and organizational ticketing.
 - **Dual Planning Modes:**
-  - **`LLM_MODE=on` (Autonomous Tool Selection):** Google Gemini (`gemini-2.0-flash` function-calling adapter in `llm.py`) receives live MCP tool definitions and dynamically chooses which tools to execute based on the user query.
-  - **`LLM_MODE=off` (Deterministic Graph Planner):** Fixed, reproducible graph-native planner that categorizes queries and dispatches specialized graph tool suites with zero external API dependencies.
+  - **`LLM_MODE=on` (Autonomous Tool Selection):** Model-selected tools via any OpenAI-compatible provider (Groq, Mistral, OpenRouter, local Ollama). In `llm.py`, converts MCP tool specifications into OpenAI `tools` format, running a multi-turn conversation loop (temperature 0, at most 6 steps) with exponential backoff on HTTP 429 and automatic fallback to the fixed planner.
+  - **`LLM_MODE=off` (Fixed Planner):** Fixed, reproducible graph-native planner that categorizes queries and dispatches specialized graph tool suites with zero external API dependencies.
 - **Hero Proof:**
   - Asking questions like `"What should we do first?"`, `"Who knows about Cardiology?"`, or `"Which decisions are at risk?"` executes distinct multi-step tool call traces over an official Python MCP SDK `ClientSession` over `stdio` transport to `mcp_server.py`.
   - Built-in algorithms identify top guidelines via PageRank, review contamination clusters via WCC, and shortest evidence paths (`tests/test_analyst_mcp.py`, `docs/analyst_transcripts.md`).
@@ -116,7 +116,7 @@ Ripple maintains three isolated graph namespaces in FalkorDB:
 | `[:RETRACTS]` | 4 | `(:Retraction)-[:RETRACTS]->(:Trial)` | Retraction notice invalidating a clinical trial. |
 | `[:OWNS]` | 2 | `(:Committee)-[:OWNS]->(:Guideline)` | Committee with institutional ownership of guideline. |
 | `[:OF]` | *pipeline* | `(:Impact)-[:OF]->(:Review)` | Statistical delta tied to systematic review. |
-| `[:SHARES_TRIAL]` | *pipeline* | `(:Review)-[:SHARES_TRIAL {n}]->(:Review)` | Co-pooled retracted trial contamination edge. |
+| `[:SHARES_TRIAL]` | *pipeline* | `(:Review)-[:SHARES_TRIAL {n}]->(:Review)` | Co-pooled retracted trial contamination edge. (*Created lazily upon retraction contamination analysis via KnowledgeEngine.build_contamination_clusters*). |
 
 ### 4.3 `tenant_<id>` Graph (Team Memory & Explainability)
 | Label | Properties | Description |
@@ -129,6 +129,48 @@ Ripple maintains three isolated graph namespaces in FalkorDB:
 | `Ranking` | `id, ts, retraction_id` | Historical alert ranking events. |
 | `Item` | `id, ext_id, kind` | Ranked alert items. |
 | **Edges** | `(Session)-[:FOLLOWS]->(Session)`, `(Session)-[:HAS]->(Message)`, `(Episode)-[:IN]->(Session)`, `(Rule)-[:LEARNED_FROM]->(Episode)`, `(Fact)-[:SUPERSEDES]->(Fact)`, `(Ranking)-[:USED {delta}]->(Rule)`, `(Ranking)-[:RANKED {rank, score, base}]->(Item)` |
+
+---
+
+### 4.4 Alert Base-Score Formula & Worked Real Examples (`ranking.py::compute_base_score`)
+
+Alert severity begins with an empirical baseline score computed strictly from the retracted evidence parameters:
+
+$$\text{base} = 0.4 \times \text{reason\_w} + 0.3 \times \text{weight\_share} + 0.2 \times \text{flips} + 0.1 \times \min\left(\frac{\text{guideline\_count}}{3}, 1.0\right)$$
+
+Where:
+- **`reason_w` (Severity Weight):**
+  - `fabrication` / `data_falsification`: $1.0$
+  - `error`: $0.6$
+  - `unknown`: $0.5$
+  - `administrative`: $0.2$
+- **`weight_share`:** Percentage weight of the retracted trial inside the systematic review meta-analysis ($\in [0.0, 1.0]$).
+- **`flips`:** $1.0$ if removing the retracted trial reverses effect direction or nullifies statistical significance ($p < 0.05 \rightarrow p \ge 0.05$); else $0.0$.
+- **`guideline_count`:** Number of institutional guidelines citing the review, normalized over a denominator of 3 ($\le 1.0$).
+
+#### Worked Real Output Examples from `scripts/demo_two_teams.py`:
+1. **Administrative Formatting Notice (`SYN-REV-ADM`):**
+   - Reason: `administrative` $\rightarrow \text{reason\_w} = 0.2$
+   - Meta-analysis weight share: $0.05$
+   - Statistical flip: `False` ($0.0$)
+   - Citing guidelines: 1 (`SYN-GL-001`) $\rightarrow 1/3 \approx 0.3333$
+   $$\text{base} = 0.4(0.2) + 0.3(0.05) + 0.2(0.0) + 0.1(0.3333) = 0.08 + 0.015 + 0.0 + 0.0333 = \mathbf{0.1283}$$
+
+2. **Severe Fabrication Notice (`SYN-REV-FAB`):**
+   - Reason: `fabrication` $\rightarrow \text{reason\_w} = 1.0$
+   - Meta-analysis weight share: $0.05$
+   - Statistical flip: `False` ($0.0$)
+   - Citing guidelines: 1 (`SYN-GL-001`) $\rightarrow 1/3 \approx 0.3333$
+   $$\text{base} = 0.4(1.0) + 0.3(0.05) + 0.2(0.0) + 0.1(0.3333) = 0.40 + 0.015 + 0.0 + 0.0333 = \mathbf{0.4483}$$
+
+#### Final Score Calculation & Safety Guardrails:
+$$\text{adjusted} = \text{base} + \text{clamp}\left(\sum \Delta_{\text{rules}}, -0.4, 0.4\right)$$
+- If critical (`reason == "fabrication"` or `flips == True`):
+  - If $\text{adjusted} < 0.5$, safety floor triggers with base score tie-breaker:
+    $$\text{final} = 0.5 + 0.01 \times \text{base}$$
+    *(Ensures severe alerts never score below 0.5 and ties are broken by empirical base score rather than showing an identical 0.5)*
+  - Else: $\text{final} = \min(1.0, \text{adjusted})$
+- If non-critical: $\text{final} = \max(0.0, \min(1.0, \text{adjusted}))$
 
 ---
 
@@ -248,13 +290,15 @@ cp .env.example .env
 ### 3. Initialize & Reset Database Deterministically
 ```bash
 python scripts/reset.py
+# Or run the two-team demo directly:
+python -m scripts.demo_two_teams
 ```
 
 ### 4. Run Automated Test Suite
 ```bash
 pytest -v tests/
 ```
-*All 28 unit, concurrency, isolation, and pipeline tests will execute.*
+*All 32 unit, concurrency, isolation, and pipeline tests will execute.*
 
 ### 5. Launch Ripple Web Application
 ```bash
@@ -279,14 +323,76 @@ Open your browser to: **`http://localhost:8000`**
 - **Act 3: Tenant Memory & Fault-Tolerant Coordination (75s):**
   1. In Ranked Alerts, click "Why this rank?" on an administrative alert to view baseline scoring.
   2. Click "✕ Dismiss" on 3 administrative alerts.
-  3. Watch Panel 3: The Librarian immediately consolidates the feedback into active rule `rule_reason_administrative` ($\Delta = -0.3$).
+  3. Watch Panel 3: The Librarian immediately consolidates the feedback into active rule `rule_administrative_low` ($\Delta = -0.3$).
   4. Notice the alert score immediately drops by 0.3, and "Why this rank?" now displays the applied rule and its 3 source episodes.
   5. Switch tenant to `Oncology Committee` $\rightarrow$ observe that Oncology's memory and rankings remain isolated and untouched.
   6. Run `python scripts/chaos.py` in terminal $\rightarrow$ witness two workers assassinated with `kill -9` while leases auto-reclaim and all tasks finish with 0 double claims.
 
 ---
 
-## 9. Data Labeling & Integrity
+## 9. Production Deployment Architecture (Design Blueprint)
+
+```
+                       [ Cloud Load Balancer / Ingress ]
+                                      |
+                     +----------------+----------------+
+                     |        PUBLIC_MODE=1            |
+                     |  Rate Limiting on all POST      |
+                     +----------------+----------------+
+                                      |
+       +------------------------------+------------------------------+
+       |                                                             |
++------v-----------------------+             +-----------------------v------+
+| Service 1: Web & API         |             | Service 2: Worker Daemon     |
+| (FastAPI / Uvicorn)          |             | (agents/runner.py supervisor)|
+|                              |             |                              |
+| - SSE streaming / updates    |             | - Watcher Worker             |
+| - REST API endpoints         |             | - Tracer Worker              |
+| - Dashboard UI serving       |             | - Statistician Worker        |
+| - MCP Client Session         |             | - Briefer Worker             |
+|                              |             | - Librarian Worker           |
++--------------+---------------+             +---------------+--------------+
+               |                                             |
+               +----------------------+----------------------+
+                                      |
+                      [ FalkorDB Connection Pool ]
+                      Target Region: us-central1 (near GCP DB)
+                                      |
+                      +---------------v---------------+
+                      | FalkorDB Cloud (TLS 61804)    |
+                      | - coord graph                 |
+                      | - knowledge graph             |
+                      | - tenant_<id> graphs          |
+                      +-------------------------------+
+```
+
+1. **Two-Service Architecture:**
+   - **Service 1 (`web`):** Runs `uvicorn api:app --host 0.0.0.0 --port 8000`. Handles API calls, dashboard serving, and on-demand MCP analyst sessions.
+   - **Service 2 (`workers`):** Runs the supervisor executing the 5 real workers (`watcher`, `tracer`, `statistician`, `briefer`, `librarian` via `agents/runner.py`). Workers continuously poll the `coord` graph, claim tasks atomically, maintain lease heartbeats, and reclaim expired leases.
+2. **Network Proximity:**
+   - Deploy both container services in Google Cloud Platform region `us-central1` (matching the FalkorDB Cloud endpoint `us-central1.gcp.cloud:61804`) to ensure sub-millisecond query latencies.
+3. **Public Mode & Rate Limiting:**
+   - When `PUBLIC_MODE=1`, all `POST` routes (`/api/tasks`, `/api/dismiss`, `/api/run-analyst`, `/api/tenants/*/episodes`) are strictly rate-limited using a token-bucket limiter (10 requests/min per IP), and dangerous administrative resets (`/api/reset`) are disabled.
+4. **Environment Variables Required (Names Only):**
+   - `FALKORDB_HOST`
+   - `FALKORDB_PORT`
+   - `FALKORDB_USERNAME`
+   - `FALKORDB_PASSWORD`
+   - `LLM_MODE`
+   - `LLM_BASE_URL`
+   - `LLM_API_KEY`
+   - `LLM_MODEL`
+   - `PUBLIC_MODE`
+   - `API_PORT`
+   - `API_HOST`
+   - `WORKER_CONCURRENCY`
+   - `LEASE_DURATION_SEC`
+   - `RECLAIM_INTERVAL_SEC`
+   - `RANDOM_SEED`
+
+---
+
+## 10. Data Labeling & Integrity
 
 - **Synthetic Data:** In accordance with Hackathon Rule 4, all generated trial data, reviews, guidelines, decisions, documents, and messages are synthetic, prefixed with `SYN-`, and flagged with property `synthetic: true`.
 - **Fictional Organization:** The hospital organization, committees, personnel names, and chat logs are entirely fictional.
@@ -294,7 +400,7 @@ Open your browser to: **`http://localhost:8000`**
 
 ---
 
-## 10. Medical Safety & Disclaimer
+## 11. Medical Safety & Disclaimer
 
 > **IMPORTANT MEDICAL NOTICE:**  
 > Ripple is an automated decision-support and evidence-tracing tool designed strictly for administrative, methodological, and institutional audit review.  
@@ -303,6 +409,6 @@ Open your browser to: **`http://localhost:8000`**
 
 ---
 
-## 11. AI Assistance Disclosure
+## 12. AI Assistance Disclosure
 
 Design and specification drafted with Claude (Anthropic); implementation and testing with Antigravity (Google DeepMind). *(Note: User confirmation required)*. All architectural decisions, performance benchmarks, and adaptations are logged in [DECISIONS.md](DECISIONS.md).

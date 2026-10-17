@@ -43,15 +43,14 @@ def test_api_tenant_memory_and_rules():
     review_id = alerts[0]["review_id"]
     initial_ranking_id = data["ranking_id"]
 
-    # 3. Post 3 dismissals on administrative category with varying buckets via API
-    buckets = ["low", "mid", "high"]
+    # 3. Post 3 dismissals on administrative category with low weight bucket via API
     for i in range(3):
         ep_res = client.post(
             "/api/tenants/cardio_api/episodes",
             json={
                 "kind": "dismiss",
                 "reason": "administrative",
-                "weight_bucket": buckets[i],
+                "weight_bucket": "low",
                 "flips": False,
                 "ext_review": f"SYN-REV-{i+1}",
                 "ext_retraction": "SYN-RET-001",
@@ -61,12 +60,12 @@ def test_api_tenant_memory_and_rules():
         assert ep_res.status_code == 200
         assert ep_res.json()["status"] == "recorded"
 
-    # 4. Check memory endpoint returns rule
+    # 4. Check memory endpoint returns conjunctive rule
     mem_res = client.get("/api/tenants/cardio_api/memory")
     assert mem_res.status_code == 200
     mem_data = mem_res.json()
     rules = mem_data["active_rules"]
-    assert any(r["id"] == "rule_reason_administrative" for r in rules)
+    assert any(r["id"] == "rule_administrative_low" for r in rules)
 
     # 5. Fetch rankings again with alert of reason_category=administrative
     # Alert with administrative reason should now be downranked by 0.3

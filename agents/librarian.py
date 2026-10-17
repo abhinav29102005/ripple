@@ -1,6 +1,7 @@
 """
 Librarian Agent: consolidates episodic feedback into active procedural rules
 and semantic facts. Updates hit rates, delta adjustments, and retires stale rules.
+Evaluates conjunctive features (reason, weight_bucket) to prevent overly broad rules.
 """
 from collections import defaultdict
 from typing import Any, Dict, List, Optional
@@ -14,27 +15,30 @@ class LibrarianHandler:
         episodes = self.memory.get_episodes()
         active_rules = {r["id"]: r for r in self.memory.get_active_rules()}
 
-        # Group episodes by (feature, value)
-        # Features to evaluate: reason, weight_bucket, flips
+        # Group episodes by conjunctive feature tuple (reason, weight_bucket)
+        # Avoid broad single-feature rules (such as flips=false) that match most alerts.
         feature_episodes: Dict[tuple, List[Dict[str, Any]]] = defaultdict(list)
 
         for ep in episodes:
-            if ep.get("reason"):
-                r_val = str(ep["reason"]).lower()
-            if r_val in ("data_falsification", "falsification"):
-                r_val = "fabrication"
-            feature_episodes[("reason", r_val)].append(ep)
-            if ep.get("weight_bucket"):
-                feature_episodes[("weight_bucket", str(ep["weight_bucket"]).lower())].append(ep)
-            if "flips" in ep:
-                feature_episodes[("flips", str(ep["flips"]).lower())].append(ep)
+            r_val = ep.get("reason")
+            if r_val:
+                r_val = str(r_val).lower()
+                if r_val in ("data_falsification", "falsification"):
+                    r_val = "fabrication"
+
+            w_val = ep.get("weight_bucket")
+            if w_val:
+                w_val = str(w_val).lower()
+
+            if r_val and w_val:
+                feature_episodes[("reason,weight_bucket", f"{r_val},{w_val}")].append(ep)
 
         created_rules = []
         updated_rules = []
         retired_rules = []
 
         for (feat, val), eps in feature_episodes.items():
-            rule_id = f"rule_{feat}_{val}"
+            rule_id = f"rule_{val.replace(',', '_')}"
             total = len(eps)
             if total < 3:
                 continue
@@ -45,10 +49,12 @@ class LibrarianHandler:
             escalate_rate = escalate_count / total
 
             ep_ids = [e["id"] for e in eps]
+            parts = val.split(",")
+            r_label, w_label = parts[0], parts[1]
 
             if dismiss_rate >= 0.8:
                 delta = -0.3
-                desc = f"Down-rank alerts where {feat} is '{val}' by 0.3 (based on {dismiss_count}/{total} dismissals)"
+                desc = f"Down-rank alerts where reason is '{r_label}' and weight is '{w_label}' by 0.3 (based on {dismiss_count}/{total} dismissals)"
                 self.memory.save_rule(
                     rule_id=rule_id,
                     feature=feat,
@@ -67,7 +73,7 @@ class LibrarianHandler:
 
             elif escalate_rate >= 0.8:
                 delta = 0.3
-                desc = f"Up-rank alerts where {feat} is '{val}' by 0.3 (based on {escalate_count}/{total} escalations)"
+                desc = f"Up-rank alerts where reason is '{r_label}' and weight is '{w_label}' by 0.3 (based on {escalate_count}/{total} escalations)"
                 self.memory.save_rule(
                     rule_id=rule_id,
                     feature=feat,
@@ -85,10 +91,8 @@ class LibrarianHandler:
                     created_rules.append(rule_id)
 
             else:
-                # Contradicting feedback: check if an active rule should be retired
                 if rule_id in active_rules:
                     existing = active_rules[rule_id]
-                    # If previously dismiss rule, hit rate is dismiss_rate; if escalate rule, escalate_rate
                     eff_rate = dismiss_rate if existing["delta"] < 0 else escalate_rate
                     if eff_rate < 0.5:
                         desc = f"Retired rule for {feat}='{val}' (hit rate dropped to {eff_rate:.2f})"

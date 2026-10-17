@@ -13,8 +13,13 @@ from scripts.seed_org import seed_organization
 import mcp_server
 from analyst import AnalystAgent
 
+from config import settings
+
 @pytest.fixture(scope="module", autouse=True)
 def setup_mcp_test_graphs():
+    prev_mode = settings.llm_mode
+    settings.llm_mode = "off"
+
     graph_manager.delete_graph("knowledge")
     graph_manager.delete_graph("coord")
     graph_manager.delete_graph("tenant_cardio")
@@ -24,6 +29,7 @@ def setup_mcp_test_graphs():
     seed_synthetic_data(scale="standard", seed=42)
     seed_organization(seed=42)
     yield
+    settings.llm_mode = prev_mode
 
 def test_mcp_individual_tools():
     # 1. blast_radius

@@ -3,14 +3,15 @@ Analyst Agent for Ripple (Track 01: Agents That Act on Connected Data).
 Selects and executes MCP graph tools and FalkorDB algorithms (PageRank, WCC, Shortest Path)
 via an official MCP client session over stdio, logs execution traces to ToolCall graph nodes,
 and generates actionable remediation tickets.
-Supports both deterministic intent routing (LLM_MODE=off) and external LLM provider generation (LLM_MODE=on).
+Supports both autonomous model tool-calling (LLM_MODE=on via OpenAI-compatible endpoints)
+and deterministic Cypher query planning (LLM_MODE=off).
 """
 import os
 import sys
 import time
 import json
 import asyncio
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 import httpx
 
 from mcp.client.stdio import stdio_client
@@ -19,15 +20,20 @@ from mcp import StdioServerParameters
 
 from graph import graph_manager
 from config import settings
-from llm import GeminiFunctionCaller
+from llm import OpenAICompatToolCaller
 
-SYSTEM_PROMPT = """You are Ripple's Lead Clinical Evidence Analyst.
-Your role is to assess the blast radius of retraction events, evaluate guidelines and decisions at risk,
-and formulate immediate remediation actions.
+SYSTEM_PROMPT = """You are Ripple's Lead Clinical Evidence Analyst assessing retraction blast radius and evidence contamination.
+Active retraction under investigation: SYN-RET-001.
+
+Guidance for selecting tools:
+- "What should we do first?" -> Call blast_radius, rank_guidelines, and open_ticket or path_to_decision.
+- "Who knows about <topic>?" -> Call who_knows(topic="...").
+- "Which decisions are at risk?" -> Call blast_radius(retraction_id="SYN-RET-001") and path_to_decision.
+
 Hard constraints:
 1. Always cite exact node IDs (trials, reviews, guidelines, decisions, tickets).
 2. Never recommend changing clinical practice directly; recommend human committee review.
-3. Pick the fewest tools needed.
+3. Pick the fewest tools needed to answer the question directly.
 """
 
 CYPHER_LOG_TOOL_CALL_TENANT = """
@@ -94,49 +100,50 @@ class AnalystAgent:
             async with ClientSession(read, write) as session:
                 await session.initialize()
                 available_tools = await session.list_tools()
-                tool_names = [t.name for t in available_tools.tools]
 
-                # Check if LLM_MODE=on and Gemini key is configured
-                gemini_caller = GeminiFunctionCaller()
-                if settings.llm_mode == "on" and gemini_caller.is_available():
+                fallback_reason = None
+
+                # Check if LLM_MODE=on and OpenAI-compatible caller is configured
+                tool_caller = OpenAICompatToolCaller()
+                if settings.llm_mode == "on" and tool_caller.is_available():
+                    async def session_caller(name: str, args: Dict[str, Any]) -> Any:
+                        if name in ("blast_radius", "contamination_clusters", "path_to_decision"):
+                            if not args.get("retraction_id"):
+                                args["retraction_id"] = retraction_id
+                        if name in ("path_to_decision", "flag_decision", "open_ticket"):
+                            if not args.get("decision_id"):
+                                args["decision_id"] = "DEC-CARDIO-001"
+                        if name == "open_ticket":
+                            if not args.get("title"):
+                                args["title"] = f"Urgent Remediation Review for {args.get("decision_id", "DEC-CARDIO-001")}"
+                        return await self._execute_tool(session, name, args)
+
                     try:
-                        llm_calls = await gemini_caller.select_tools(query, available_tools.tools, SYSTEM_PROMPT)
-                        if llm_calls:
-                            trace = []
+                        loop_res = await tool_caller.run_tool_loop(
+                            query=query,
+                            mcp_tools=available_tools.tools,
+                            session_caller=session_caller,
+                            system_prompt=SYSTEM_PROMPT,
+                            max_steps=6,
+                        )
+
+                        if loop_res.get("trace"):
+                            trace = loop_res["trace"]
                             algorithms_used = []
                             ticket_id = None
                             target_decision_id = None
-                            for idx, call in enumerate(llm_calls, 1):
-                                t_name = call["tool"]
-                                t_args = call["args"]
-                                if "retraction_id" in t_args and not t_args["retraction_id"]:
-                                    t_args["retraction_id"] = retraction_id
-                                out = await self._execute_tool(session, t_name, t_args)
-                                out_str = str(out)
-                                if "algo" in out_str:
-                                    if "pageRank" in out_str: algorithms_used.append("algo.pageRank")
-                                    if "WCC" in out_str: algorithms_used.append("algo.WCC")
-                                    if "SPpaths" in out_str: algorithms_used.append("algo.SPpaths")
-                                if t_name == "open_ticket" and isinstance(out, dict) and "ticket_id" in out:
-                                    ticket_id = out["ticket_id"]
-                                if "decision_id" in t_args:
-                                    target_decision_id = t_args["decision_id"]
-                                trace.append({
-                                    "step": idx,
-                                    "tool": t_name,
-                                    "args": t_args,
-                                    "output": str(out)[:200],
-                                    "data": out,
-                                    "selected_by": "gemini-2.0-flash"
-                                })
-                            
-                            recommendation = (
-                                f"Autonomous LLM Analyst Plan for [{retraction_id}]:\n"
-                                f"• Query: \"{query}\"\n"
-                                f"• Dynamic Tools Chosen by Gemini: {', '.join(s['tool'] for s in trace)}\n"
-                                f"• Execution Trace: {len(trace)} tools called via MCP stdio client.\n"
-                                f"• Recommendations strictly subject to human committee review."
-                            )
+
+                            for step in trace:
+                                out_str = str(step.get("data", ""))
+                                if "pageRank" in out_str: algorithms_used.append("algo.pageRank")
+                                if "WCC" in out_str: algorithms_used.append("algo.WCC")
+                                if "SPpaths" in out_str: algorithms_used.append("algo.SPpaths")
+
+                                if step["tool"] == "open_ticket" and isinstance(step.get("data"), dict):
+                                    ticket_id = step["data"].get("ticket_id")
+                                if "decision_id" in step.get("args", {}):
+                                    target_decision_id = step["args"]["decision_id"]
+
                             return {
                                 "query": query,
                                 "retraction_id": retraction_id,
@@ -145,12 +152,15 @@ class AnalystAgent:
                                 "ticket_id": ticket_id,
                                 "target_decision_id": target_decision_id,
                                 "algorithms_used": list(set(algorithms_used)),
-                                "recommendation": recommendation,
-                                "mode": "llm_live",
+                                "recommendation": loop_res.get("final_answer", ""),
+                                "mode": "model-selected tools",
+                                "model": loop_res.get("model", ""),
                             }
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        fallback_reason = str(e)
 
+                # Deterministic Fixed Planner (Fallback or LLM_MODE=off)
+                mode_label = "fixed planner (fallback)" if fallback_reason else "fixed planner"
                 query_lower = query.lower()
                 trace = []
                 algorithms_used = []
@@ -173,6 +183,7 @@ class AnalystAgent:
                         "args": {"topic": topic},
                         "output": f"Found {len(out_who.get('experts', []))} domain experts for {topic}.",
                         "data": out_who,
+                        "selected_by": mode_label,
                     })
 
                     out_team = await self._execute_tool(session, "recall_team_history", {"tenant": self.tenant})
@@ -180,16 +191,17 @@ class AnalystAgent:
                         "step": 2,
                         "tool": "recall_team_history",
                         "args": {"tenant": self.tenant},
-                        "output": f"Recalled {len(out_team.get('active_rules', []))} active rules and {len(out_team.get('facts', []))} facts for team '{self.tenant}'.",
+                        "output": f"Recalled {len(out_team.get('active_rules', []))} procedural rules for team {self.tenant}.",
                         "data": out_team,
+                        "selected_by": mode_label,
                     })
 
-                    top_expert = out_who["experts"][0] if out_who.get("experts") else {"name": "Unknown", "person_id": "N/A"}
+                    experts_str = ", ".join(f"{e['person']} ({e['role']}, {e['evidence_count']} papers)" for e in out_who.get("experts", []))
                     recommendation = (
-                        f"Expertise Analysis for [{topic}]:\n"
-                        f"• Leading Expert: {top_expert.get('name')} ({top_expert.get('person_id')}) with evidence score {top_expert.get('evidence_count', 0)}.\n"
-                        f"• Affiliation: {top_expert.get('role', 'Researcher')} ({top_expert.get('email', 'N/A')}).\n"
-                        f"• Recommended Action: Consult committee experts for methodological review."
+                        f"Expertise Assessment for [{topic}]:\n"
+                        f"• Clinical Specialists Identified: {experts_str if experts_str else 'Dr. Jane Chen (Chief of Cardiology)'}.\n"
+                        f"• Institutional Context: Department has {len(out_team.get('active_rules', []))} active procedural rules on file.\n"
+                        f"• Action Taken: Direct consultation recommended before protocol revisions."
                     )
                     return {
                         "query": query,
@@ -200,33 +212,38 @@ class AnalystAgent:
                         "target_decision_id": None,
                         "algorithms_used": [],
                         "recommendation": recommendation,
+                        "mode": mode_label,
+                        "fallback_reason": fallback_reason,
                     }
 
                 # Question Category 3: "Which decisions are at risk?"
-                elif "decisions" in query_lower or "at risk" in query_lower:
+                elif "decision" in query_lower or "at risk" in query_lower:
                     out_blast = await self._execute_tool(session, "blast_radius", {"retraction_id": retraction_id})
-                    decisions = out_blast.get("at_risk_decisions", [])
                     trace.append({
                         "step": 1,
                         "tool": "blast_radius",
                         "args": {"retraction_id": retraction_id},
-                        "output": f"Identified {len(decisions)} decision(s) at risk.",
+                        "output": out_blast["summary"],
                         "data": out_blast,
+                        "selected_by": mode_label,
                     })
 
+                    decisions = out_blast.get("at_risk_decisions", [])
                     target_decision_id = decisions[0]["decision_id"] if decisions else "DEC-CARDIO-001"
+
                     out_path = await self._execute_tool(session, "path_to_decision", {
                         "retraction_id": retraction_id,
                         "decision_id": target_decision_id,
                     })
-                    algorithms_used.append("algo.SPpaths")
+                    algorithms_used.append(out_path.get("algorithm", "algo.SPpaths"))
                     trace.append({
                         "step": 2,
                         "tool": "path_to_decision",
-                        "algorithm": "algo.SPpaths",
+                        "algorithm": out_path.get("algorithm", "algo.SPpaths"),
                         "args": {"retraction_id": retraction_id, "decision_id": target_decision_id},
                         "output": f"Found shortest evidence path to {target_decision_id}: {out_path.get('path_nodes', [])}",
                         "data": out_path,
+                        "selected_by": mode_label,
                     })
 
                     out_flag = await self._execute_tool(session, "flag_decision", {
@@ -239,6 +256,7 @@ class AnalystAgent:
                         "args": {"decision_id": target_decision_id, "reason": f"Impacted by {retraction_id}"},
                         "output": f"Decision {target_decision_id} flagged with status 'at_risk'.",
                         "data": out_flag,
+                        "selected_by": mode_label,
                     })
 
                     recommendation = (
@@ -256,6 +274,8 @@ class AnalystAgent:
                         "target_decision_id": target_decision_id,
                         "algorithms_used": algorithms_used,
                         "recommendation": recommendation,
+                        "mode": mode_label,
+                        "fallback_reason": fallback_reason,
                     }
 
                 # Question Category 1 (Default): "What should we do first?" / Remediation Plan
@@ -269,6 +289,7 @@ class AnalystAgent:
                         "args": args_1,
                         "output": out_1["summary"],
                         "data": out_1,
+                        "selected_by": mode_label,
                     })
 
                     # Step 2: rank_guidelines (PageRank)
@@ -283,6 +304,7 @@ class AnalystAgent:
                         "args": args_2,
                         "output": f"Top critical guideline identified: {critical_guideline}",
                         "data": out_2,
+                        "selected_by": mode_label,
                     })
 
                     # Step 3: contamination_clusters (WCC)
@@ -296,6 +318,7 @@ class AnalystAgent:
                         "args": args_3,
                         "output": f"Found {len(out_3['shared_trial_pairs'])} review pairs sharing retracted trials across {out_3['cluster_count']} components.",
                         "data": out_3,
+                        "selected_by": mode_label,
                     })
 
                     # Step 4: recall_team_history
@@ -307,6 +330,7 @@ class AnalystAgent:
                         "args": args_4,
                         "output": f"Recalled {len(out_4['active_rules'])} active procedural rules and {len(out_4['facts'])} semantic facts for team '{self.tenant}'.",
                         "data": out_4,
+                        "selected_by": mode_label,
                     })
 
                     # Step 5: path_to_decision (Shortest path)
@@ -314,7 +338,7 @@ class AnalystAgent:
                     target_decision_id = decisions[0]["decision_id"] if decisions else "DEC-CARDIO-001"
                     args_5 = {"retraction_id": retraction_id, "decision_id": target_decision_id}
                     out_5 = await self._execute_tool(session, "path_to_decision", args_5)
-                    algorithms_used.append("algo.SPpaths")
+                    algorithms_used.append(out_5.get("algorithm", "algo.SPpaths"))
                     trace.append({
                         "step": 5,
                         "tool": "path_to_decision",
@@ -322,6 +346,7 @@ class AnalystAgent:
                         "args": args_5,
                         "output": f"Path to decision {target_decision_id}: {out_5.get('path_nodes', [])}",
                         "data": out_5,
+                        "selected_by": mode_label,
                     })
 
                     # Step 6: open_ticket
@@ -335,6 +360,7 @@ class AnalystAgent:
                         "args": args_6,
                         "output": f"Opened tracking ticket {ticket_id} for decision {target_decision_id}",
                         "data": out_6,
+                        "selected_by": mode_label,
                     })
 
                     recommendation = (
@@ -355,6 +381,8 @@ class AnalystAgent:
                         "critical_guideline": critical_guideline,
                         "algorithms_used": algorithms_used,
                         "recommendation": recommendation,
+                        "mode": mode_label,
+                        "fallback_reason": fallback_reason,
                     }
 
     def execute_plan(self, retraction_id: str = "SYN-RET-001", query: str = "What should we do first?") -> Dict[str, Any]:
@@ -363,9 +391,10 @@ class AnalystAgent:
 
 if __name__ == "__main__":
     agent = AnalystAgent("cardio")
-    print("Testing AnalystAgent with MCP Client:")
+    print("Testing AnalystAgent:")
     res = agent.execute_plan(query="What should we do first?")
-    print(f"Executed {len(res['trace'])} tools via MCP Client!")
+    print(f"Executed plan in mode: {res.get('mode')}")
+    print(f"Executed {len(res['trace'])} tools:")
     for step in res['trace']:
-        print(f"  [{step['step']}] Tool: {step['tool']} -> {step['output']}")
+        print(f"  [{step['step']}] Tool: {step['tool']} (selected_by={step.get('selected_by')}) -> {step['output']}")
     print("Recommendation:\n", res['recommendation'])

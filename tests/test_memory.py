@@ -1,7 +1,7 @@
 """
 Unit tests for Milestone M3: Tenant Memory and Procedural Rule Consolidation.
 Verifies:
-- 3 dismissals generate an active procedural rule with delta = -0.3
+- 3 dismissals sharing (reason, weight_bucket) generate an active conjunctive procedural rule with delta = -0.3
 - Rule application shifts ranking score and establishes USED & LEARNED_FROM explanation paths
 - Rule retirement on contradictory feedback
 - Fact supersession history preservation
@@ -24,7 +24,7 @@ def test_three_dismissals_create_active_rule(clean_tenant_graph):
     mem = clean_tenant_graph
     sess_id = mem.create_session()
 
-    # Record 3 dismissals on administrative retractions
+    # Record 3 dismissals on administrative retractions with low weight bucket
     ep_ids = []
     for i in range(3):
         eid = mem.record_episode(
@@ -43,12 +43,12 @@ def test_three_dismissals_create_active_rule(clean_tenant_graph):
     librarian = LibrarianHandler(mem)
     res = librarian.consolidate()
 
-    assert "rule_reason_administrative" in res["created_rules"]
+    assert "rule_administrative_low" in res["created_rules"]
 
     active_rules = mem.get_active_rules()
     rule_map = {r["id"]: r for r in active_rules}
-    assert "rule_reason_administrative" in rule_map
-    rule = rule_map["rule_reason_administrative"]
+    assert "rule_administrative_low" in rule_map
+    rule = rule_map["rule_administrative_low"]
     assert rule["delta"] == -0.3
     assert rule["support"] == 3
     assert rule["hit_rate"] == 1.0
@@ -63,7 +63,7 @@ def test_rule_modifies_next_ranking_and_explains(clean_tenant_graph):
         "review_id": "SYN-REV-999",
         "title": "Review 999",
         "reason_category": "administrative",
-        "weight_share": 0.05,
+        "weight_share": 0.05,  # low weight bucket
         "flips": False,
         "guidelines": ["SYN-GL-01"],
     }]
@@ -73,11 +73,11 @@ def test_rule_modifies_next_ranking_and_explains(clean_tenant_graph):
     assert unmodified_ranked[0]["score"] == base_score
     assert len(unmodified_ranked[0]["applied_rules"]) == 0
 
-    # 2. Add 3 dismissals for administrative retractions with varying buckets
+    # 2. Add 3 dismissals for administrative retractions sharing weight_bucket=low
     ep_ids = [
-        mem.record_episode(sess_id, "dismiss", "administrative", "low", True, "REV-0", "RET-1"),
-        mem.record_episode(sess_id, "dismiss", "administrative", "mid", False, "REV-1", "RET-1"),
-        mem.record_episode(sess_id, "dismiss", "administrative", "high", False, "REV-2", "RET-1"),
+        mem.record_episode(sess_id, "dismiss", "administrative", "low", False, "REV-0", "RET-1"),
+        mem.record_episode(sess_id, "dismiss", "administrative", "low", False, "REV-1", "RET-1"),
+        mem.record_episode(sess_id, "dismiss", "administrative", "low", False, "REV-2", "RET-1"),
     ]
     librarian = LibrarianHandler(mem)
     librarian.consolidate()
@@ -89,7 +89,7 @@ def test_rule_modifies_next_ranking_and_explains(clean_tenant_graph):
     expected_score = max(0.0, round(base_score - 0.3, 4))
     assert item["score"] == expected_score
     assert len(item["applied_rules"]) == 1
-    assert item["applied_rules"][0]["id"] == "rule_reason_administrative"
+    assert item["applied_rules"][0]["id"] == "rule_administrative_low"
 
     # 4. Verify explainability path
     explanation = mem.explain_ranking(ranking_id, "SYN-REV-999")
@@ -98,7 +98,7 @@ def test_rule_modifies_next_ranking_and_explains(clean_tenant_graph):
     assert explanation["final_score"] == expected_score
     assert len(explanation["rules_applied"]) == 1
     rule_exp = explanation["rules_applied"][0]
-    assert rule_exp["rule_id"] == "rule_reason_administrative"
+    assert rule_exp["rule_id"] == "rule_administrative_low"
     assert rule_exp["delta"] == -0.3
     assert set(ep_ids).issubset(set(rule_exp["learned_from_episodes"]))
 
@@ -111,15 +111,15 @@ def test_rule_retirement_on_contradictory_feedback(clean_tenant_graph):
     for i in range(3):
         mem.record_episode(sess_id, "dismiss", "administrative", "low", False, f"REV-{i}", "RET-1")
     librarian.consolidate()
-    assert any(r["id"] == "rule_reason_administrative" for r in mem.get_active_rules())
+    assert any(r["id"] == "rule_administrative_low" for r in mem.get_active_rules())
 
     # Add 4 escalations for administrative alerts (dismiss rate drops from 3/3=1.0 to 3/7=0.43 < 0.5)
     for i in range(4):
         mem.record_episode(sess_id, "escalate", "administrative", "low", False, f"REV-ESC-{i}", "RET-2")
 
     res = librarian.consolidate()
-    assert "rule_reason_administrative" in res["retired_rules"]
-    assert not any(r["id"] == "rule_reason_administrative" for r in mem.get_active_rules())
+    assert "rule_administrative_low" in res["retired_rules"]
+    assert not any(r["id"] == "rule_administrative_low" for r in mem.get_active_rules())
 
 def test_semantic_fact_supersession(clean_tenant_graph):
     mem = clean_tenant_graph

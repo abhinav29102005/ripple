@@ -2,6 +2,7 @@
 Alert severity and tenant-personalized ranking engine for Ripple.
 Calculates baseline severity and applies active procedural rules from tenant memory.
 Enforces safety caps ([-0.4, +0.4]) and clinical safety floors (>= 0.5 for fabrication/flips).
+When the safety floor applies, breaks ties among floored alerts by base score.
 """
 from typing import Any, Dict, List, Optional, Tuple
 from memory import TenantMemory
@@ -60,6 +61,7 @@ class RankingEngine:
         Applies tenant-specific active rules with:
         1. Adjustment cap [-0.4, +0.4]
         2. Clinical safety floor (>= 0.5 for fabrication or flips=True)
+        3. Tie-breaking among floored alerts by base score.
         Persists the ranking with USED edges.
         """
         active_rules = self.memory.get_active_rules()
@@ -67,11 +69,10 @@ class RankingEngine:
         all_applied_rules = {}
 
         for alert in alerts:
-            rev_id = alert["review_id"]
-            raw_cat = alert.get("reason_category", "unknown").lower()
-            if raw_cat in ("data_falsification", "falsification"):
-                raw_cat = "fabrication"
-            reason_cat = raw_cat
+            rev_id = alert.get("review_id", "unknown")
+            reason_cat = alert.get("reason_category", "unknown").lower()
+            if reason_cat in ("data_falsification", "falsification"):
+                reason_cat = "fabrication"
 
             weight_share = float(alert.get("weight_share", 0.0))
             flips = bool(alert.get("flips", False))
@@ -86,16 +87,18 @@ class RankingEngine:
                 "reason": reason_cat,
                 "weight_bucket": weight_bucket,
                 "flips": flips_str,
+                "reason,weight_bucket": f"{reason_cat},{weight_bucket}",
             }
 
-            # Match active rules
+            # Match active rules (supports conjunctive reason,weight_bucket and legacy single-feature)
             item_rules = []
             raw_delta_sum = 0.0
             for r in active_rules:
-                feat = r["feature"]
-                val = str(r["value"]).lower()
+                feat = r.get("feature", "")
+                val = str(r.get("value", "")).lower()
                 if val in ("data_falsification", "falsification"):
                     val = "fabrication"
+
                 if alert_features.get(feat) == val:
                     item_rules.append(r)
                     raw_delta_sum += float(r["delta"])
@@ -105,11 +108,18 @@ class RankingEngine:
             capped_delta = min(DELTA_CAP_MAX, max(DELTA_CAP_MIN, raw_delta_sum))
             adjusted_score = base + capped_delta
 
-            # Invariant 2: Clinical safety floor
-            # Alerts with fabrication or statistical flips can never score below 0.5
+            # Invariant 2: Clinical safety floor with tie-breaking
+            # Alerts with fabrication or statistical flips can never score below 0.5.
+            # When the floor applies, break ties by base score so they do not all show an identical 0.5.
             is_critical = (reason_cat == "fabrication") or flips
+            safety_floor_triggered = False
+
             if is_critical:
-                final_score = max(SAFETY_FLOOR_SCORE, min(1.0, round(adjusted_score, 4)))
+                if adjusted_score < SAFETY_FLOOR_SCORE:
+                    safety_floor_triggered = True
+                    final_score = round(SAFETY_FLOOR_SCORE + (base * 0.01), 4)
+                else:
+                    final_score = min(1.0, round(adjusted_score, 4))
             else:
                 final_score = max(0.0, min(1.0, round(adjusted_score, 4)))
 
@@ -126,7 +136,7 @@ class RankingEngine:
                 "flips": flips,
                 "guidelines": guidelines,
                 "applied_rules": item_rules,
-                "safety_floor_active": is_critical and (adjusted_score < SAFETY_FLOOR_SCORE),
+                "safety_floor_active": safety_floor_triggered,
             })
 
         # Sort descending by personalized score, then base

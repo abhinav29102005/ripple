@@ -1,8 +1,9 @@
 """
-Unit tests for Ranking Safety Invariants (Item 1):
+Unit tests for Ranking Safety Invariants:
 1. Rule adjustment cap: total delta strictly clamped to [-0.4, +0.4]
 2. Safety floor: alerts with reason='fabrication' or flips=True never score below 0.5
-3. Rule-stacking: multiple matching rules stack their deltas up to the cap
+3. Tie-breaking: when the safety floor applies, ties are broken by base score
+4. Rule-stacking: multiple matching rules stack their deltas up to the cap
 """
 import pytest
 from graph import graph_manager
@@ -21,7 +22,6 @@ def test_rule_adjustment_cap_negative_and_positive(clean_safety_tenant):
     mem = clean_safety_tenant
 
     # Case A: Negative cap [-0.4]
-    # Create two negative rules: -0.3 and -0.3 (sum = -0.6)
     mem.save_rule("rule_1", "reason", "error", delta=-0.3, support=5, hit_rate=1.0, description="r1")
     mem.save_rule("rule_2", "weight_bucket", "low", delta=-0.3, support=5, hit_rate=1.0, description="r2")
 
@@ -29,7 +29,7 @@ def test_rule_adjustment_cap_negative_and_positive(clean_safety_tenant):
     alert = [{
         "review_id": "REV-TEST-01",
         "reason_category": "error",
-        "weight_share": 0.05,  # low weight
+        "weight_share": 0.05,
         "flips": False,
         "guidelines": [],
     }]
@@ -47,7 +47,7 @@ def test_rule_adjustment_cap_negative_and_positive(clean_safety_tenant):
     alert_pos = [{
         "review_id": "REV-TEST-02",
         "reason_category": "administrative",
-        "weight_share": 0.20,  # mid weight
+        "weight_share": 0.20,
         "flips": False,
         "guidelines": [],
     }]
@@ -61,15 +61,12 @@ def test_rule_adjustment_cap_negative_and_positive(clean_safety_tenant):
 def test_safety_floor_fabrication_and_flips(clean_safety_tenant):
     mem = clean_safety_tenant
 
-    # Create maximum negative downranking rules
     mem.save_rule("rule_down_1", "reason", "fabrication", delta=-0.3, support=5, hit_rate=1.0, description="r1")
     mem.save_rule("rule_down_2", "weight_bucket", "low", delta=-0.3, support=5, hit_rate=1.0, description="r2")
 
     engine = RankingEngine(mem)
 
     # 1. Alert with reason='fabrication' (low weight, no flips)
-    # Base = 0.4*1.0 + 0.3*0.01 = 0.403.
-    # Adjusted with -0.4 cap would be 0.003 without safety floor.
     alert_fab = [{
         "review_id": "REV-FAB-01",
         "reason_category": "fabrication",
@@ -80,10 +77,9 @@ def test_safety_floor_fabrication_and_flips(clean_safety_tenant):
     ranked_fab, _ = engine.rank_alerts("SYN-RET-TEST", alert_fab, persist=False)
     item_fab = ranked_fab[0]
     assert item_fab["score"] >= SAFETY_FLOOR_SCORE
-    assert item_fab["score"] == 0.5
     assert item_fab["safety_floor_active"] is True
 
-    # Also test legacy alias 'data_falsification' normalizes to 'fabrication' and hits floor
+    # 2. Legacy alias 'data_falsification' normalizes to 'fabrication'
     alert_legacy = [{
         "review_id": "REV-FAB-LEGACY",
         "reason_category": "data_falsification",
@@ -96,9 +92,7 @@ def test_safety_floor_fabrication_and_flips(clean_safety_tenant):
     assert item_legacy["reason_category"] == "fabrication"
     assert item_legacy["score"] >= SAFETY_FLOOR_SCORE
 
-    # 2. Alert with flips=True (reason is administrative)
-    # Base = 0.4*0.2 + 0.3*0.01 + 0.2*1.0 = 0.283.
-    # Adjusted with -0.4 cap would be 0.0 without safety floor.
+    # 3. Alert with flips=True
     mem.save_rule("rule_adm", "reason", "administrative", delta=-0.3, support=5, hit_rate=1.0, description="ra")
     alert_flip = [{
         "review_id": "REV-FLIP-01",
@@ -110,48 +104,85 @@ def test_safety_floor_fabrication_and_flips(clean_safety_tenant):
     ranked_flip, _ = engine.rank_alerts("SYN-RET-TEST", alert_flip, persist=False)
     item_flip = ranked_flip[0]
     assert item_flip["score"] >= SAFETY_FLOOR_SCORE
-    assert item_flip["score"] == 0.5
     assert item_flip["safety_floor_active"] is True
+
+def test_safety_floor_tie_breaking_by_base_score(clean_safety_tenant):
+    """
+    Item 9: When safety floor applies, break ties among floored alerts
+    by base score so they do not all show an identical 0.5.
+    """
+    mem = clean_safety_tenant
+    # Force heavy negative rule to push both critical alerts below 0.5
+    mem.save_rule("r_conj", "reason,weight_bucket", "fabrication,low", delta=-0.4, support=5, hit_rate=1.0, description="heavy down")
+
+    engine = RankingEngine(mem)
+    # Alert A has higher base score (higher weight share and guideline count)
+    alert_a = {
+        "review_id": "REV-CRIT-A",
+        "reason_category": "fabrication",
+        "weight_share": 0.08,  # low bucket
+        "flips": False,
+        "guidelines": ["GL-1"],
+    }
+    # Alert B has lower base score
+    alert_b = {
+        "review_id": "REV-CRIT-B",
+        "reason_category": "fabrication",
+        "weight_share": 0.01,  # low bucket
+        "flips": False,
+        "guidelines": [],
+    }
+
+    ranked, _ = engine.rank_alerts("SYN-RET-TEST", [alert_b, alert_a], persist=False)
+    assert len(ranked) == 2
+
+    item_a = next(x for x in ranked if x["review_id"] == "REV-CRIT-A")
+    item_b = next(x for x in ranked if x["review_id"] == "REV-CRIT-B")
+
+    assert item_a["safety_floor_active"] is True
+    assert item_b["safety_floor_active"] is True
+
+    # Both must be >= 0.5
+    assert item_a["score"] >= 0.5
+    assert item_b["score"] >= 0.5
+
+    # They must NOT show identical scores
+    assert item_a["score"] != item_b["score"], f"Both floored alerts show identical score {item_a['score']}"
+    # Tie broken by base score
+    assert item_a["base"] > item_b["base"]
+    assert item_a["score"] > item_b["score"]
+    assert item_a["rank"] < item_b["rank"]
 
 def test_rule_stacking_case(clean_safety_tenant):
     mem = clean_safety_tenant
 
-    # 3 rules matching different features
     mem.save_rule("rule_reason_error", "reason", "error", delta=-0.15, support=4, hit_rate=1.0, description="error rule")
-    mem.save_rule("rule_weight_low", "weight_bucket", "mid", delta=-0.10, support=4, hit_rate=1.0, description="low weight rule")
+    mem.save_rule("rule_weight_mid", "weight_bucket", "mid", delta=-0.10, support=4, hit_rate=1.0, description="mid weight rule")
     mem.save_rule("rule_flips_false", "flips", "false", delta=-0.05, support=4, hit_rate=1.0, description="flips false rule")
 
     engine = RankingEngine(mem)
     alert = [{
         "review_id": "REV-STACK-01",
         "reason_category": "error",
-        "weight_share": 0.05,
+        "weight_share": 0.20,  # mid weight
         "flips": False,
         "guidelines": ["GL-1", "GL-2", "GL-3"],
-        "weight_share": 0.20,  # mid weight
     }]
 
     ranked, _ = engine.rank_alerts("SYN-RET-TEST", alert, persist=False)
     item = ranked[0]
     
-    # Check all 3 rules matched and stacked
     assert len(item["applied_rules"]) == 3
     rule_ids = {r["id"] for r in item["applied_rules"]}
-    assert rule_ids == {"rule_reason_error", "rule_weight_low", "rule_flips_false"}
+    assert rule_ids == {"rule_reason_error", "rule_weight_mid", "rule_flips_false"}
 
     expected_delta = -0.15 + -0.10 + -0.05  # -0.30
     assert item["raw_delta"] == -0.30
-    assert item["delta"] == -0.30  # within [-0.4, 0.4] cap
+    assert item["delta"] == -0.30
     expected_score = round(item["base"] - 0.30, 4)
     assert item["score"] == expected_score
 
-
 def test_final_ranking_formula_clamp_and_safety_floor(clean_safety_tenant):
-    """
-    Asserts that for all ranked items:
-    final == clamp(base + capped_rule_deltas, 0.0, 1.0)
-    with the safety floor (final >= 0.5) strictly enforced if reason='fabrication' or flips=True.
-    """
     mem = clean_safety_tenant
     mem.save_rule("r_admin", "reason", "administrative", delta=-0.25, support=3, hit_rate=1.0, description="desc")
     mem.save_rule("r_low", "weight_bucket", "low", delta=-0.25, support=3, hit_rate=1.0, description="desc")
@@ -175,7 +206,10 @@ def test_final_ranking_formula_clamp_and_safety_floor(clean_safety_tenant):
         is_critical = (item["reason_category"] == "fabrication") or item["flips"]
 
         if is_critical:
-            expected = max(0.5, min(1.0, adjusted))
+            if adjusted < 0.5:
+                expected = round(0.5 + (base * 0.01), 4)
+            else:
+                expected = min(1.0, adjusted)
         else:
             expected = max(0.0, min(1.0, adjusted))
 

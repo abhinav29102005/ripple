@@ -121,16 +121,16 @@ def main():
     librarian = LibrarianHandler(mem_cardio)
     lib_res = librarian.consolidate()
     assert len(lib_res.get("created_rules", [])) > 0, f"Memory test FAILED: No rule created! lib_res={lib_res}"
-    assert "rule_reason_administrative" in lib_res["created_rules"], "rule_reason_administrative not in created_rules!"
+    assert "rule_administrative_low" in lib_res["created_rules"], "rule_administrative_low not in created_rules!"
     active_rules = [r["id"] for r in mem_cardio.get_active_rules()]
-    assert "rule_reason_administrative" in active_rules
+    assert "rule_administrative_low" in active_rules
     print(f"  [PASS] Consolidated 3 dismissals into procedural rules: {lib_res['created_rules']}")
 
     # --- 5. Tenant Isolation Test ---
     print("\n[TEST 5] Multi-Tenant Isolation...")
     mem_onco = TenantMemory("onco")
     onco_rules = mem_onco.get_active_rules()
-    assert not any(r["id"] == "rule_reason_administrative" for r in onco_rules), "Leak! Onco saw Cardio rule!"
+    assert not any(r["id"] == "rule_administrative_low" for r in onco_rules), "Leak! Onco saw Cardio rule!"
     print(f"  [PASS] Tenant isolation verified: tenant_onco has 0 administrative rules from tenant_cardio.")
 
     # --- 6. Company Brain (Staleness Propagation & Who-Knows) ---
