@@ -40,12 +40,12 @@ def reset_all_graphs(seed: int = 42):
 
     # 4. Seed initial tenant memory facts
     cardio_mem = TenantMemory("cardio")
-    cardio_mem.set_fact("preferred_pooling_model", "fixed_effect")
-    cardio_mem.set_fact("clinical_guideline_authority", "American College of Cardiology (ACC)")
+    cardio_mem.set_fact("preferred_pooling_model", "fixed")
+    cardio_mem.set_fact("clinical_guideline_authority", "Cardiology Clinical Evidence Board (CCEB)")
 
     onco_mem = TenantMemory("onco")
-    onco_mem.set_fact("preferred_pooling_model", "random_effects")
-    onco_mem.set_fact("clinical_guideline_authority", "American Society of Clinical Oncology (ASCO)")
+    onco_mem.set_fact("preferred_pooling_model", "fixed")
+    onco_mem.set_fact("clinical_guideline_authority", "Oncology Research Review Board (ORRB)")
 
     # 5. Persist snapshot
     graph_manager.save_state()

@@ -17,6 +17,7 @@ ON CREATE SET r.date = $date,
               r.reason_category = $reason_category,
               r.notice_url = $notice_url,
               r.synthetic = $synthetic
+ON MATCH SET r.reason_category = CASE WHEN $reason_category <> 'unknown' THEN $reason_category ELSE coalesce(r.reason_category, $reason_category) END
 WITH r
 MATCH (t:Trial {id: $trial_id})
 SET t.status = 'retracted'
@@ -27,7 +28,8 @@ RETURN r.id AS rid, t.id AS tid
 CYPHER_BLAST_RADIUS = """
 MATCH (r:Retraction {id: $rid})-[:RETRACTS]->(t:Trial)-[i:INCLUDED_IN]->(rev:Review)
 OPTIONAL MATCH (rev)-[:INFORMS]->(g:Guideline)
-RETURN t.id AS trial, rev.id AS review, i.yi AS yi, i.sei AS sei, collect(DISTINCT g.id) AS guidelines
+RETURN t.id AS trial, rev.id AS review, i.yi AS yi, i.sei AS sei, collect(DISTINCT g.id) AS guidelines,
+       coalesce(r.reason_category, 'unknown') AS reason_category
 """
 
 CYPHER_GET_REVIEW_TRIALS = """
@@ -39,6 +41,7 @@ CYPHER_SAVE_IMPACT = """
 MERGE (imp:Impact {id: $id})
 SET imp.review_id = $review_id,
     imp.retraction_id = $retraction_id,
+    imp.reason_category = $reason_category,
     imp.before = $before,
     imp.before_lo = $before_lo,
     imp.before_hi = $before_hi,
@@ -103,10 +106,12 @@ RETURN a.id AS rev1, b.id AS rev2, n
 CYPHER_GET_IMPACT_BY_RETRACTION = """
 MATCH (imp:Impact {retraction_id: $rid})-[:OF]->(rev:Review)
 OPTIONAL MATCH (rev)-[:INFORMS]->(g:Guideline)
+OPTIONAL MATCH (r:Retraction {id: $rid})
 RETURN imp.id AS id, rev.id AS review_id, rev.title AS review_title,
        imp.before AS before, imp.after AS after, imp.pct_change AS pct_change,
        imp.flips AS flips, imp.weight_share AS weight_share,
-       collect(DISTINCT g.id) AS guidelines
+       collect(DISTINCT g.id) AS guidelines,
+       coalesce(imp.reason_category, r.reason_category, 'unknown') AS reason_category
 """
 
 class KnowledgeEngine:
@@ -127,6 +132,21 @@ class KnowledgeEngine:
         date: str = "",
         synthetic: bool = True,
     ) -> Dict[str, str]:
+        from ranking import normalize_reason_text
+        norm_cat = normalize_reason_text(text=reason, category=reason_category)
+        if norm_cat != "unknown":
+            reason_category = norm_cat
+        else:
+            # Ingestion safety: never overwrite a stored non-unknown category with unknown
+            try:
+                exist_q = self.graph.query(
+                    "MATCH (r:Retraction {id: $id}) RETURN r.reason_category", {"id": retraction_id}
+                )
+                if exist_q.result_set and exist_q.result_set[0][0] and exist_q.result_set[0][0] != "unknown":
+                    reason_category = exist_q.result_set[0][0]
+            except Exception:
+                pass
+
         date = date or time.strftime("%Y-%m-%d")
         res = self.graph.query(CYPHER_INGEST_RETRACTION, {
             "id": retraction_id,
@@ -151,6 +171,7 @@ class KnowledgeEngine:
                 "yi": float(r[2]),
                 "sei": float(r[3]),
                 "guidelines": r[4],
+                "reason_category": r[5] if len(r) > 5 and r[5] else "unknown",
             })
         return items
 
@@ -172,6 +193,7 @@ class KnowledgeEngine:
             "id": impact_data["id"],
             "review_id": impact_data["review_id"],
             "retraction_id": impact_data["retraction_id"],
+            "reason_category": impact_data.get("reason_category", "unknown"),
             "before": float(impact_data["before"]),
             "before_lo": float(impact_data["before_lo"]),
             "before_hi": float(impact_data["before_hi"]),
@@ -241,6 +263,7 @@ class KnowledgeEngine:
                 "flips": r[6],
                 "weight_share": r[7],
                 "guidelines": r[8],
+                "reason_category": r[9] if len(r) > 9 and r[9] else "unknown",
             })
         return impacts
 

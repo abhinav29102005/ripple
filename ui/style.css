@@ -281,7 +281,7 @@ body {
 .dot-trial { background: var(--accent-amber); }
 .dot-review { background: var(--accent-cyan); }
 .dot-guideline { background: var(--accent-primary); }
-.dot-decision { background: var(--accent-purple); }
+.dot-decision { background: #d946ef; border: 1.5px solid #f43f5e; box-shadow: 0 0 6px rgba(244, 63, 94, 0.6); }
 
 .inspector-card {
   position: absolute;
@@ -611,8 +611,12 @@ body {
   z-index: 100;
 }
 
+.hidden {
+  display: none !important;
+}
+
 .modal.hidden {
-  display: none;
+  display: none !important;
 }
 
 .modal-card {

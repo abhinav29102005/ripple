@@ -110,7 +110,7 @@ Ripple features a high-density, real-time command center:
 | **Claim Throughput** | **364.2 tasks/sec** | > 100 tasks/sec |
 | **Claim Latency (p50 / p95)** | **9.74 ms / 35.51 ms** | < 50 ms |
 | **Chaos Worker Assassination (`kill -9`)** | **200/200 done (0 lost)** | 100% completion |
-| **Automated Unit & Integration Tests** | **32 passed / 0 failed** | 100% passing |
+| **Automated Unit & Integration Tests** | **36 passed / 0 failed** | 100% passing |
 | **Tenant Isolation** | **0 cross-tenant leaks** | Strict isolation |
 
 ---

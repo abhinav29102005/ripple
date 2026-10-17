@@ -103,10 +103,10 @@ function renderD3Graph(nodes, links) {
     .selectAll("circle")
     .data(nodes)
     .join("circle")
-    .attr("r", d => d.label === "Retraction" ? 14 : d.label === "Review" ? 10 : 8)
-    .attr("fill", d => colorMap[d.label] || "#94a3b8")
-    .attr("stroke", "#0f172a")
-    .attr("stroke-width", 2)
+    .attr("r", d => d.label === "Retraction" ? 14 : d.label === "Review" ? 11 : d.label === "Decision" ? 11 : 8)
+    .attr("fill", d => (d.label === "Decision" && d.status === "at_risk") ? "#d946ef" : (colorMap[d.label] || "#94a3b8"))
+    .attr("stroke", d => (d.label === "Decision" && d.status === "at_risk") ? "#f43f5e" : "#0f172a")
+    .attr("stroke-width", d => (d.label === "Decision" && d.status === "at_risk") ? 3 : 2)
     .style("cursor", "pointer")
     .call(d3.drag()
       .on("start", (e, d) => {
@@ -161,9 +161,17 @@ function showInspector(node) {
   document.getElementById("inspect-title").innerText = node.id;
 
   let html = `<p><strong>Type:</strong> ${node.label}</p>`;
+  if (node.title && node.title !== node.id) html += `<p><strong>Title:</strong> ${node.title}</p>`;
+  if (node.status) {
+    const isRisk = node.status === "at_risk";
+    html += `<p><strong>Status:</strong> <span class="badge ${isRisk ? 'badge-danger' : 'badge-info'}" style="${isRisk ? 'background:rgba(244,63,94,0.2); color:#f43f5e; border:1px solid #f43f5e;' : ''}">${node.status}</span></p>`;
+  }
+  if (node.committee) html += `<p><strong>Committee:</strong> ${node.committee}</p>`;
+  if (node.notify && node.notify.length) {
+    html += `<p><strong>Owners to Notify:</strong><br/><span style="color:#f43f5e; font-size:0.75rem;">${node.notify.join(", ")}</span></p>`;
+  }
   if (node.yi !== undefined) html += `<p><strong>Pooled Effect (yi):</strong> ${node.yi}</p>`;
   if (node.sei !== undefined) html += `<p><strong>Standard Error (sei):</strong> ${node.sei}</p>`;
-  if (node.status) html += `<p><strong>Status:</strong> ${node.status}</p>`;
 
   document.getElementById("inspect-details").innerHTML = html;
 }
@@ -175,6 +183,18 @@ function closeInspector() {
 // ==========================================
 // Panel 2: Live Coordination Board
 // ==========================================
+async function loadDemoScenario() {
+  try {
+    const res = await fetch(`/api/tenants/${state.tenant}/load-demo?retraction_id=${state.retractionId}`, {
+      method: "POST"
+    });
+    const data = await res.json();
+    await refreshDashboard();
+  } catch (err) {
+    console.error("Error loading demo scenario:", err);
+  }
+}
+
 async function fetchTasks() {
   try {
     const res = await fetch("/api/tasks");
@@ -345,6 +365,7 @@ function renderRankedAlerts(alerts) {
         <div class="alert-scores">
           <span style="font-size: 0.72rem; color: #64748b;">Base: ${a.base}</span>
           <span class="score-badge ${scoreClass}">Score: ${a.score}</span>
+          ${a.safety_floor_active ? '<span class="badge" style="background:rgba(16,185,129,0.18); color:#10b981; border:1px solid #10b981; font-size:0.62rem; margin-left:0.25rem;">🛡️ Floor Active</span>' : ''}
         </div>
       </div>
       <div style="font-size: 0.8rem; color: #cbd5e1;">${a.title}</div>
@@ -403,27 +424,49 @@ async function toggleWhy(el, reviewId) {
   }
   detailsEl.classList.remove("hidden");
 
+  const alert = (state.rankings || []).find(a => a.review_id === reviewId) || {};
+  const cat = (alert.reason_category || "unknown").toLowerCase();
+  const reasonW = cat === "fabrication" ? 1.0 : cat === "error" ? 0.6 : cat === "administrative" ? 0.2 : 0.5;
+  const ws = parseFloat(alert.weight_share || 0.0);
+  const f = alert.flips ? 1.0 : 0.0;
+  const glCount = (alert.guidelines || []).length;
+  const glVal = Math.min(glCount / 3.0, 1.0);
+  const calcBase = (0.4 * reasonW + 0.3 * ws + 0.2 * f + 0.1 * glVal).toFixed(4);
+
+  const breakdownHtml = `
+    <div style="margin-top: 0.35rem; padding: 0.45rem; background: rgba(15,23,42,0.65); border: 1px solid rgba(148,163,184,0.15); border-radius: 4px; font-family: monospace; font-size: 0.70rem; color: #94a3b8; line-height: 1.45;">
+      <strong>Formula Breakdown:</strong><br/>
+      base = 0.4 × reason_w (${cat} → ${reasonW}) + 0.3 × weight_share (${(ws * 100).toFixed(1)}%) + 0.2 × flips (${f.toFixed(1)}) + 0.1 × (guidelines/3: ${glCount}/3)<br/>
+      = ${(0.4 * reasonW).toFixed(4)} + ${(0.3 * ws).toFixed(4)} + ${(0.2 * f).toFixed(4)} + ${(0.1 * glVal).toFixed(4)} = <strong>${alert.base !== undefined ? alert.base : calcBase}</strong>
+      ${alert.safety_floor_active ? '<br/><span style="color:#10b981; font-weight:600;">🛡️ Safety floor active: Critical clinical floor (>= 0.5) enforced.</span>' : ''}
+    </div>
+  `;
+
   if (!state.activeRankingId) {
-    detailsEl.innerHTML = "Base score calculated from retraction reason and trial weight share.";
+    detailsEl.innerHTML = `<div><strong>No learned rules applied. Base score only</strong></div>${breakdownHtml}`;
     return;
   }
 
   try {
     const res = await fetch(`/api/tenants/${state.tenant}/explain/${state.activeRankingId}/${reviewId}`);
+    if (!res.ok) {
+      detailsEl.innerHTML = `<div><strong>No learned rules applied. Base score only</strong></div>${breakdownHtml}`;
+      return;
+    }
     const data = await res.json();
 
     if (!data.rules_applied || data.rules_applied.length === 0) {
-      detailsEl.innerHTML = `<strong>Base Score:</strong> ${data.base_score}<br/>No active procedural rules matched this alert. Score reflects standard baseline.`;
+      detailsEl.innerHTML = `<div><strong>No learned rules applied. Base score only</strong></div>${breakdownHtml}`;
     } else {
       let html = `<strong>Base Score:</strong> ${data.base_score} → <strong>Final Score:</strong> ${data.final_score}<br/><strong>Rules Applied:</strong><ul>`;
       data.rules_applied.forEach(r => {
         html += `<li><strong>${r.rule_id}</strong> (${r.delta > 0 ? '+' : ''}${r.delta}): ${r.description}<br/><span style="color:#64748b">Learned from episodes: ${r.learned_from_episodes.join(", ")}</span></li>`;
       });
-      html += `</ul>`;
+      html += `</ul>${breakdownHtml}`;
       detailsEl.innerHTML = html;
     }
   } catch (err) {
-    detailsEl.innerHTML = "Explanation path unavailable.";
+    detailsEl.innerHTML = `<div><strong>No learned rules applied. Base score only</strong></div>${breakdownHtml}`;
   }
 }
 

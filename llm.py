@@ -46,10 +46,14 @@ class OpenAICompatToolCaller:
         base_url: Optional[str] = None,
         api_key: Optional[str] = None,
         model: Optional[str] = None,
+        max_retries: int = 3,
+        initial_backoff: float = 1.0,
     ):
         self.base_url = (base_url or settings.llm_base_url or os.getenv("LLM_BASE_URL", "")).rstrip("/")
         self.api_key = api_key or settings.llm_api_key or os.getenv("LLM_API_KEY", "")
         self.model = model or settings.llm_model or os.getenv("LLM_MODEL", "")
+        self.max_retries = max_retries
+        self.initial_backoff = initial_backoff
 
     def is_available(self) -> bool:
         """Available if base_url and model are configured."""
@@ -59,9 +63,11 @@ class OpenAICompatToolCaller:
         self,
         client: httpx.AsyncClient,
         payload: Dict[str, Any],
-        max_retries: int = 4,
-        initial_backoff: float = 2.5,
+        max_retries: Optional[int] = None,
+        initial_backoff: Optional[float] = None,
     ) -> Dict[str, Any]:
+        max_retries = max_retries if max_retries is not None else self.max_retries
+        initial_backoff = initial_backoff if initial_backoff is not None else self.initial_backoff
         """
         Sends chat completion request with exponential backoff on HTTP 429 or network errors.
         """

@@ -185,6 +185,7 @@ def test_mock_fallback_on_error(mock_server, monkeypatch):
     MockOpenAIHandler.scenario = "server_error"
     MockOpenAIHandler.call_count = 0
 
+    monkeypatch.setenv("TESTING", "1")
     monkeypatch.setenv("LLM_MODE", "on")
     monkeypatch.setenv("LLM_BASE_URL", mock_server)
     monkeypatch.setenv("LLM_API_KEY", "mock_key")
@@ -196,7 +197,7 @@ def test_mock_fallback_on_error(mock_server, monkeypatch):
     monkeypatch.setattr(settings, "llm_api_key", "mock_key")
     monkeypatch.setattr(settings, "llm_model", "mock-model")
 
-    caller = OpenAICompatToolCaller(base_url=mock_server, api_key="mock_key", model="mock-model")
+    caller = OpenAICompatToolCaller(base_url=mock_server, api_key="mock_key", model="mock-model", max_retries=1, initial_backoff=0.01)
     
     async def _should_fail():
         await caller.run_tool_loop(

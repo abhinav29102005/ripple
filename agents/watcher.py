@@ -6,6 +6,11 @@ from typing import Any, Dict
 from knowledge import KnowledgeEngine
 from coord import CoordEngine
 
+from ranking import normalize_reason_text
+
+def classify_reason_category(reason: str, category: str = "unknown") -> str:
+    return normalize_reason_text(text=reason, category=category)
+
 class WatcherHandler:
     def __init__(self, knowledge: KnowledgeEngine, coord: CoordEngine):
         self.knowledge = knowledge
@@ -15,7 +20,7 @@ class WatcherHandler:
         ret_id = payload.get("retraction_id") or payload.get("id")
         trial_id = payload.get("trial_id")
         reason = payload.get("reason", "Retraction notice published")
-        category = payload.get("reason_category", "unknown")
+        category = classify_reason_category(reason, payload.get("reason_category", "unknown"))
         notice_url = payload.get("notice_url", "")
         synthetic = payload.get("synthetic", True)
 

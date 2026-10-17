@@ -54,12 +54,12 @@ def main():
 
     print("\n4. Seeding Tenant Memory Facts...")
     cardio_mem = TenantMemory("cardio")
-    cardio_mem.set_fact("preferred_pooling_model", "fixed_effect")
-    cardio_mem.set_fact("clinical_guideline_authority", "American College of Cardiology (ACC)")
+    cardio_mem.set_fact("preferred_pooling_model", "fixed")
+    cardio_mem.set_fact("clinical_guideline_authority", "Cardiology Clinical Evidence Board (CCEB)")
 
     onco_mem = TenantMemory("onco")
-    onco_mem.set_fact("preferred_pooling_model", "random_effects")
-    onco_mem.set_fact("clinical_guideline_authority", "American Society of Clinical Oncology (ASCO)")
+    onco_mem.set_fact("preferred_pooling_model", "fixed")
+    onco_mem.set_fact("clinical_guideline_authority", "Oncology Research Review Board (ORRB)")
 
     print("\n5. Verifying Seeded Cloud Graphs...")
     kg = cloud_mgr.get_graph("knowledge")

@@ -43,8 +43,8 @@ class LibrarianHandler:
             if total < 3:
                 continue
 
-            dismiss_count = sum(1 for e in eps if e["kind"] == "dismiss")
-            escalate_count = sum(1 for e in eps if e["kind"] == "escalate")
+            dismiss_count = sum(1 for e in eps if e["kind"] in ("dismiss", "dismissal"))
+            escalate_count = sum(1 for e in eps if e["kind"] in ("escalate", "escalation"))
             dismiss_rate = dismiss_count / total
             escalate_rate = escalate_count / total
 

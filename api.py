@@ -1,3 +1,7 @@
+from agents.watcher import WatcherHandler
+from agents.tracer import TracerHandler
+from agents.statistician import StatisticianHandler
+from agents.briefer import BrieferHandler
 from analyst import AnalystAgent
 """
 FastAPI REST API for Ripple.
@@ -76,6 +80,21 @@ class FactSubmission(BaseModel):
 
 # --- Endpoints ---
 
+def classify_reason_wording(reason: str, explicit_category: Optional[str] = None) -> str:
+    if explicit_category and explicit_category.lower() not in ("unknown", ""):
+        cat = explicit_category.lower().strip()
+        if cat in ("data_falsification", "falsification"):
+            return "fabrication"
+        return cat
+    r_lower = (reason or "").lower()
+    if any(w in r_lower for w in ("fabricat", "falsif", "fraud", "manipulat", "misconduct")):
+        return "fabrication"
+    elif any(w in r_lower for w in ("error", "mistake", "calculation", "coding", "software bug", "flaw")):
+        return "error"
+    elif any(w in r_lower for w in ("administrative", "publisher", "formatting", "duplicate", "author request")):
+        return "administrative"
+    return "unknown"
+
 @app.get("/api/health")
 def health_check():
     graphs = graph_manager.list_graphs()
@@ -84,6 +103,7 @@ def health_check():
 @app.post("/api/retractions")
 def submit_retraction(sub: RetractionSubmission):
     coord = CoordEngine(graph_manager.get_graph("coord"))
+    category = classify_reason_wording(sub.reason, sub.reason_category)
     task_key = f"ingest:{sub.retraction_id}"
     task_id = coord.spawn_task(
         task_type="ingest",
@@ -91,7 +111,7 @@ def submit_retraction(sub: RetractionSubmission):
             "retraction_id": sub.retraction_id,
             "trial_id": sub.trial_id,
             "reason": sub.reason,
-            "reason_category": sub.reason_category,
+            "reason_category": category,
             "notice_url": sub.notice_url,
         },
         key=task_key,
@@ -137,6 +157,23 @@ def get_graph_blast(retraction_id: str):
                 nodes_map[gid] = {"id": gid, "label": "Guideline"}
             edges.append({"source": rev_id, "target": gid, "type": "INFORMS"})
 
+    # Track 03: Decision nodes and Committee / owners to notify
+    decisions = knowledge.get_at_risk_decisions(retraction_id)
+    for d in decisions:
+        did = d["decision_id"]
+        if did not in nodes_map:
+            nodes_map[did] = {
+                "id": did,
+                "label": "Decision",
+                "title": d.get("title", did),
+                "status": "at_risk",
+                "committee": d.get("committee", ""),
+                "notify": d.get("notify", []),
+            }
+        rev_id = d.get("review_id")
+        if rev_id and rev_id in nodes_map:
+            edges.append({"source": did, "target": rev_id, "type": "BASED_ON"})
+
     return {
         "retraction_id": retraction_id,
         "nodes": list(nodes_map.values()),
@@ -149,6 +186,14 @@ def get_tenant_rankings(tenant: str, retraction_id: str = "SYN-RET-001"):
     mem = TenantMemory(tenant)
     ranking_engine = RankingEngine(mem)
 
+    # Query retraction's stored category
+    r_cat = "unknown"
+    r_res = knowledge.graph.query(
+        "MATCH (r:Retraction {id: $rid}) RETURN r.reason_category", {"rid": retraction_id}
+    )
+    if r_res.result_set and r_res.result_set[0][0]:
+        r_cat = r_res.result_set[0][0]
+
     # Fetch impact data
     impacts = knowledge.get_impacts_for_retraction(retraction_id)
     if not impacts:
@@ -160,7 +205,12 @@ def get_tenant_rankings(tenant: str, retraction_id: str = "SYN-RET-001"):
             "weight_share": 0.15,
             "flips": False,
             "guidelines": b["guidelines"],
+            "reason_category": b.get("reason_category") or r_cat,
         } for b in blast]
+    else:
+        for imp in impacts:
+            if not imp.get("reason_category") or imp.get("reason_category") == "unknown":
+                imp["reason_category"] = r_cat
 
     ranked_items, ranking_id = ranking_engine.rank_alerts(retraction_id, impacts, persist=True)
     return {
@@ -168,6 +218,92 @@ def get_tenant_rankings(tenant: str, retraction_id: str = "SYN-RET-001"):
         "retraction_id": retraction_id,
         "ranking_id": ranking_id,
         "ranked_alerts": ranked_items,
+    }
+
+@app.post("/api/tenants/{tenant}/load-demo")
+def load_demo_scenario(tenant: str, retraction_id: str = "SYN-RET-001"):
+    if settings.public_mode:
+        raise HTTPException(
+            status_code=403,
+            detail="Load demo scenario is disabled when PUBLIC_MODE=1."
+        )
+
+    knowledge = KnowledgeEngine(graph_manager.get_graph("knowledge"))
+    coord = CoordEngine(graph_manager.get_graph("coord"))
+    mem = TenantMemory(tenant)
+
+    # 1. Run real pipeline for SYN-RET-001 (fabrication)
+    watcher = WatcherHandler(knowledge, coord)
+    tracer = TracerHandler(knowledge, coord)
+    stat = StatisticianHandler(knowledge)
+    briefer = BrieferHandler(knowledge)
+
+    watcher.handle({
+        "retraction_id": "SYN-RET-001",
+        "trial_id": "SYN-TR-0001",
+        "reason": "Data fabrication and falsification in clinical patient records",
+        "reason_category": "fabrication",
+        "synthetic": True,
+    })
+    t1 = tracer.handle({"retraction_id": "SYN-RET-001", "reason_category": "fabrication"})
+    for r in t1["affected_reviews"]:
+        stat.handle({"retraction_id": "SYN-RET-001", "review_id": r, "reason_category": "fabrication"})
+    briefer.handle({"retraction_id": "SYN-RET-001"})
+
+    # 2. Run real pipeline for 4 low-weight administrative alerts clearly labeled synthetic
+    admin_items = [
+        ("SYN-TR-ADM-01", "SYN-REV-ADM-01", "[SYNTHETIC] Systematic Review of Registry Reporting Protocols (ADM-01)", -0.15, 0.45),
+        ("SYN-TR-ADM-02", "SYN-REV-ADM-02", "[SYNTHETIC] Clinical Guidelines Ethics Disclosure Audit (ADM-02)", 0.12, 0.40),
+        ("SYN-TR-ADM-03", "SYN-REV-ADM-03", "[SYNTHETIC] Systematic Review of Duplicate Publication Logs (ADM-03)", -0.18, 0.48),
+        ("SYN-TR-ADM-04", "SYN-REV-ADM-04", "[SYNTHETIC] Multicenter Trial Registry Formatting Review (ADM-04)", 0.14, 0.42),
+    ]
+
+    created_ids = []
+    for tid, rid, title, yi, sei in admin_items:
+        # Seed review and trial with included_in edge
+        knowledge.graph.query(
+            "MERGE (rev:Review {id: $rid}) SET rev.title = $title, rev.synthetic = true "
+            "MERGE (t:Trial {id: $tid}) SET t.status = 'active', t.synthetic = true "
+            "MERGE (t)-[:INCLUDED_IN {yi: $yi, sei: $sei}]->(rev)",
+            {"rid": rid, "title": title, "tid": tid, "yi": yi, "sei": sei}
+        )
+        for b_idx in range(5):
+            bt_id = f"SYN-TR-BASE-{rid}-{b_idx}"
+            knowledge.graph.query(
+                "MATCH (rev:Review {id: $rid}) "
+                "MERGE (t:Trial {id: $tid}) SET t.status = 'active', t.synthetic = true "
+                "MERGE (t)-[:INCLUDED_IN {yi: 0.10, sei: 0.12}]->(rev)",
+                {"tid": bt_id, "rid": rid}
+            )
+
+        adm_ret_id = f"SYN-RET-{rid}"
+        watcher.handle({
+            "retraction_id": adm_ret_id,
+            "trial_id": tid,
+            "reason": "Administrative duplication and formatting error",
+            "reason_category": "administrative",
+            "synthetic": True,
+        })
+        tr = tracer.handle({"retraction_id": adm_ret_id, "reason_category": "administrative"})
+        for r in tr["affected_reviews"]:
+            stat.handle({"retraction_id": adm_ret_id, "review_id": r, "reason_category": "administrative"})
+        briefer.handle({"retraction_id": adm_ret_id})
+
+        # Also link impact to current retraction_id so they appear in current view
+        knowledge.graph.query(
+            "MATCH (imp:Impact {id: $imp_id}), (rev:Review {id: $rid}) "
+            "SET imp.retraction_id = $curr_ret_id",
+            {"imp_id": f"imp_{adm_ret_id}_{rid}", "rid": rid, "curr_ret_id": retraction_id}
+        )
+        created_ids.append(rid)
+
+    rankings_res = get_tenant_rankings(tenant, retraction_id)
+    return {
+        "status": "loaded",
+        "tenant": tenant,
+        "retraction_id": retraction_id,
+        "created_alerts": created_ids,
+        "ranked_alerts_count": len(rankings_res.get("ranked_alerts", [])),
     }
 
 @app.post("/api/tenants/{tenant}/episodes")

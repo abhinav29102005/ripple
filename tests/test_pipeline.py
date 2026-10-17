@@ -20,6 +20,8 @@ def setup_graphs():
     graph_manager.init_knowledge_schema()
     graph_manager.init_coord_schema()
     seed_synthetic_data(scale="standard", seed=42)
+    from scripts.seed_org import seed_organization
+    seed_organization(seed=42)
     yield
 
 def test_full_retraction_pipeline():
@@ -97,3 +99,84 @@ def test_full_retraction_pipeline():
         assert isinstance(imp["pct_change"], float)
         assert isinstance(imp["flips"], bool)
         assert imp["before"] != 0.0
+        assert imp["reason_category"] == "fabrication"
+
+    # 8. Assert ranked alert has reason=fabrication, safety floor active, and final score >= 0.5
+    from fastapi.testclient import TestClient
+    from api import app
+    client = TestClient(app)
+    rank_resp = client.get(f"/api/tenants/cardio/rankings?retraction_id={target_ret_id}")
+    assert rank_resp.status_code == 200
+    alerts = rank_resp.json()["ranked_alerts"]
+    assert len(alerts) > 0
+    syn_alert = alerts[0]
+    assert syn_alert["reason_category"] == "fabrication"
+    assert syn_alert["safety_floor_active"] is True
+    assert syn_alert["score"] >= 0.5
+
+def test_api_notice_submission_with_fabrication_wording():
+    """
+    Submitting a retraction notice through the API with fabrication wording (LLM_MODE=off)
+    correctly classifies category as fabrication, propagates through the pipeline,
+    and produces a ranked alert with reason=fabrication, safety_floor_active=True, score >= 0.5.
+    """
+    from fastapi.testclient import TestClient
+    from api import app
+    client = TestClient(app)
+
+    coord = CoordEngine(graph_manager.get_graph("coord"))
+    knowledge = KnowledgeEngine(graph_manager.get_graph("knowledge"))
+    watcher = WatcherHandler(knowledge, coord)
+    tracer = TracerHandler(knowledge, coord)
+    statistician = StatisticianHandler(knowledge)
+    briefer = BrieferHandler(knowledge)
+
+    ret_id = "SYN-RET-FAB-API"
+    trial_id = "SYN-TR-0001"
+
+    # Post notice with fabrication wording without explicitly providing reason_category
+    resp = client.post("/api/retractions", json={
+        "retraction_id": ret_id,
+        "trial_id": trial_id,
+        "reason": "Institutional audit concluded severe data fabrication and falsification in clinical trial patient registries",
+        "notice_url": "https://example.org/retractions/syn-ret-fab-api",
+    })
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "queued"
+
+    # Run the worker pipeline
+    # 1. Watcher claims ingest
+    t_ingest = coord.claim_task("worker_watcher_api", task_type="ingest")
+    assert t_ingest is not None
+    res_w = watcher.handle(t_ingest["payload"])
+    assert coord.complete_task(t_ingest["id"], "worker_watcher_api", res_w)
+
+    # 2. Tracer claims trace
+    t_trace = coord.claim_task("worker_tracer_api", task_type="trace")
+    assert t_trace is not None
+    res_t = tracer.handle(t_trace["payload"])
+    assert coord.complete_task(t_trace["id"], "worker_tracer_api", res_t)
+
+    # 3. Statistician processes quantify tasks
+    while True:
+        t_stat = coord.claim_task("worker_stat_api", task_type="quantify")
+        if not t_stat:
+            break
+        res_s = statistician.handle(t_stat["payload"])
+        assert coord.complete_task(t_stat["id"], "worker_stat_api", res_s)
+
+    # 4. Briefer claims brief
+    t_brief = coord.claim_task("worker_briefer_api", task_type="brief")
+    assert t_brief is not None
+    res_b = briefer.handle(t_brief["payload"])
+    assert coord.complete_task(t_brief["id"], "worker_briefer_api", res_b)
+
+    # 5. Verify ranked alert via GET API
+    rank_resp = client.get(f"/api/tenants/cardio/rankings?retraction_id={ret_id}")
+    assert rank_resp.status_code == 200
+    alerts = rank_resp.json()["ranked_alerts"]
+    assert len(alerts) > 0
+    alert = alerts[0]
+    assert alert["reason_category"] == "fabrication"
+    assert alert["safety_floor_active"] is True
+    assert alert["score"] >= 0.5

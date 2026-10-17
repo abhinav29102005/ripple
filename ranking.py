@@ -27,16 +27,37 @@ def get_weight_bucket(weight_share: float) -> str:
     else:
         return "high"
 
+def normalize_reason_text(text: str = "", category: str = "") -> str:
+    """
+    Normalizes notice reason text / category according to spec:
+    - Text containing 'fabricat' or 'falsif' -> 'fabrication'
+    - Text containing 'administrative' or 'authorship' -> 'administrative'
+    - Text containing 'error' -> 'error'
+    - Anything else -> 'unknown'
+    """
+    candidates = []
+    if category:
+        candidates.append(str(category).lower())
+    if text:
+        candidates.append(str(text).lower())
+
+    combined = " ".join(candidates)
+    if "fabricat" in combined or "falsif" in combined:
+        return "fabrication"
+    elif "administrative" in combined or "authorship" in combined:
+        return "administrative"
+    elif "error" in combined:
+        return "error"
+    else:
+        return "unknown"
+
 def compute_base_score(
     reason_category: str,
     weight_share: float,
     flips: bool,
     guideline_count: int,
 ) -> float:
-    # Normalize legacy aliases
-    cat = reason_category.lower()
-    if cat in ("data_falsification", "falsification"):
-        cat = "fabrication"
+    cat = normalize_reason_text(category=reason_category)
 
     reason_w = REASON_WEIGHTS.get(cat, 0.5)
     w_share = max(0.0, min(1.0, weight_share))
@@ -47,8 +68,14 @@ def compute_base_score(
     return round(base, 4)
 
 class RankingEngine:
-    def __init__(self, tenant_memory: TenantMemory):
+    def __init__(self, tenant_memory: TenantMemory, knowledge: Optional[Any] = None):
         self.memory = tenant_memory
+        if knowledge is not None:
+            self.knowledge = knowledge
+        else:
+            from graph import graph_manager
+            from knowledge import KnowledgeEngine
+            self.knowledge = KnowledgeEngine(graph_manager.get_graph("knowledge"))
 
     def rank_alerts(
         self,
@@ -68,11 +95,29 @@ class RankingEngine:
         ranked_items = []
         all_applied_rules = {}
 
+        # Fetch stored reason_category and reason directly from Retraction node via Cypher
+        ret_cat = "unknown"
+        ret_reason = ""
+        try:
+            q_res = self.knowledge.graph.query(
+                "MATCH (r:Retraction {id: $rid}) RETURN coalesce(r.reason_category, 'unknown'), coalesce(r.reason, '')",
+                {"rid": retraction_id}
+            )
+            if q_res.result_set:
+                ret_cat = q_res.result_set[0][0] or "unknown"
+                ret_reason = q_res.result_set[0][1] or ""
+        except Exception:
+            pass
+
+        ret_cat_norm = normalize_reason_text(text=ret_reason, category=ret_cat)
+
         for alert in alerts:
             rev_id = alert.get("review_id", "unknown")
-            reason_cat = alert.get("reason_category", "unknown").lower()
-            if reason_cat in ("data_falsification", "falsification"):
-                reason_cat = "fabrication"
+            alert_cat = alert.get("reason_category")
+            if not alert_cat or alert_cat == "unknown":
+                reason_cat = ret_cat_norm
+            else:
+                reason_cat = normalize_reason_text(text=alert.get("reason", ""), category=alert_cat)
 
             weight_share = float(alert.get("weight_share", 0.0))
             flips = bool(alert.get("flips", False))
@@ -136,7 +181,8 @@ class RankingEngine:
                 "flips": flips,
                 "guidelines": guidelines,
                 "applied_rules": item_rules,
-                "safety_floor_active": safety_floor_triggered,
+                "safety_floor_active": is_critical,
+                "safety_floor_triggered": safety_floor_triggered,
             })
 
         # Sort descending by personalized score, then base

@@ -18,28 +18,51 @@ def main():
     print("=== Step 1: Performing clean reset of all graphs ===")
     reset_all_graphs()
 
-    # --- Setup Alerts ---
-    # Alert A: Routine Administrative notice (low severity)
-    alert_admin = {
-        "review_id": "SYN-REV-ADM",
-        "title": "Systematic Review of Protocol Registries",
-        "reason_category": "administrative",
-        "weight_share": 0.05,
-        "flips": False,
-        "guidelines": ["SYN-GL-001"],
-    }
+    # --- Setup Alerts from REAL Pipeline Execution ---
+    from graph import graph_manager
+    from coord import CoordEngine
+    from knowledge import KnowledgeEngine
+    from agents.watcher import WatcherHandler
+    from agents.tracer import TracerHandler
+    from agents.statistician import StatisticianHandler
+    from agents.briefer import BrieferHandler
 
-    # Alert B: Severe Data Fabrication notice (high severity)
-    alert_fab = {
-        "review_id": "SYN-REV-FAB",
-        "title": "Critical Phase III Cardiology Review",
+    coord = CoordEngine(graph_manager.get_graph("coord"))
+    knowledge = KnowledgeEngine(graph_manager.get_graph("knowledge"))
+    watcher = WatcherHandler(knowledge, coord)
+    tracer = TracerHandler(knowledge, coord)
+    stat = StatisticianHandler(knowledge)
+    briefer = BrieferHandler(knowledge)
+
+    # 1. Run real pipeline for SYN-RET-001 (fabrication)
+    print("[*] Running real pipeline for SYN-RET-001 (fabrication)...")
+    watcher.handle({
+        "retraction_id": "SYN-RET-001",
+        "trial_id": "SYN-TR-0001",
+        "reason": "Data fabrication and falsification in clinical patient records",
         "reason_category": "fabrication",
-        "weight_share": 0.05,
-        "flips": False,
-        "guidelines": ["SYN-GL-001"],
-    }
+    })
+    t1 = tracer.handle({"retraction_id": "SYN-RET-001", "reason_category": "fabrication"})
+    for r in t1["affected_reviews"]:
+        stat.handle({"retraction_id": "SYN-RET-001", "review_id": r, "reason_category": "fabrication"})
+    b1 = briefer.handle({"retraction_id": "SYN-RET-001"})
 
-    all_alerts = [alert_admin, alert_fab]
+    # 2. Run real pipeline for SYN-RET-003 (administrative)
+    print("[*] Running real pipeline for SYN-RET-003 (administrative)...")
+    watcher.handle({
+        "retraction_id": "SYN-RET-003",
+        "trial_id": "SYN-TR-0003",
+        "reason": "Duplicate publication and lack of proper ethics committee disclosures",
+        "reason_category": "administrative",
+    })
+    t3 = tracer.handle({"retraction_id": "SYN-RET-003", "reason_category": "administrative"})
+    for r in t3["affected_reviews"]:
+        stat.handle({"retraction_id": "SYN-RET-003", "review_id": r, "reason_category": "administrative"})
+    b3 = briefer.handle({"retraction_id": "SYN-RET-003"})
+
+    # Retrieve real pipeline output
+    all_alerts = b1["impacts"] + b3["impacts"]
+    print(f"[*] Retrieved {len(all_alerts)} real pipeline impact alerts.")
 
     # --- Setup Tenant: Cardio (Dismisses 3 administrative alerts) ---
     print("\n=== Step 2: Configuring tenant_cardio (3 dismissals on administrative) ===")
@@ -95,7 +118,7 @@ def main():
     print("\n--- Detailed Score Breakdown (Real Ranking Output) ---")
     for t_name, by_id in [("tenant_cardio", cardio_by_id), ("tenant_onco", onco_by_id)]:
         print(f"\n[{t_name}]")
-        for aid in ["SYN-REV-FAB", "SYN-REV-ADM"]:
+        for aid in ["SYN-REV-001", "SYN-REV-003"]:
             item = by_id[aid]
             rules_applied = [r["id"] for r in item["applied_rules"]]
             print(f"  Alert: {item['review_id']} ({item['reason_category']})")
@@ -108,20 +131,20 @@ def main():
 
     # --- Assertions for Item 2 Acceptance Criteria ---
     # (a) Similar administrative alert is ranked lower for cardio than onco
-    adm_c = cardio_by_id["SYN-REV-ADM"]
-    adm_o = onco_by_id["SYN-REV-ADM"]
+    adm_c = cardio_by_id["SYN-REV-003"]
+    adm_o = onco_by_id["SYN-REV-003"]
     assert adm_c["score"] < adm_o["score"], f"Administrative alert should score lower for cardio ({adm_c['score']}) than onco ({adm_o['score']})!"
     assert any("administrative" in r["id"] for r in adm_c["applied_rules"]), "Cardio should have applied administrative downranking rule!"
-    print(f"\n[PROOF (a)] Administrative alert SYN-REV-ADM: Cardio score = {adm_c['score']:.4f} < Onco score = {adm_o['score']:.4f}")
+    print(f"\n[PROOF (a)] Administrative alert SYN-REV-003: Cardio score = {adm_c['score']:.4f} < Onco score = {adm_o['score']:.4f}")
 
     # (b) Fabrication alert still ranked high (>= 0.5) for both teams because of safety floor
-    fab_c = cardio_by_id["SYN-REV-FAB"]
-    fab_o = onco_by_id["SYN-REV-FAB"]
+    fab_c = cardio_by_id["SYN-REV-001"]
+    fab_o = onco_by_id["SYN-REV-001"]
     assert fab_c["score"] >= 0.5, f"Cardio fabrication score {fab_c['score']} fell below safety floor 0.5!"
     assert fab_o["score"] >= 0.5, f"Onco fabrication score {fab_o['score']} fell below safety floor 0.5!"
     assert fab_c["safety_floor_active"] is True
     assert fab_o["safety_floor_active"] is True
-    print(f"[PROOF (b)] Fabrication alert SYN-REV-FAB: Cardio score = {fab_c['score']:.4f} >= 0.5, Onco score = {fab_o['score']:.4f} >= 0.5 (Safety Floor Active)")
+    print(f"[PROOF (b)] Fabrication alert SYN-REV-001: Cardio score = {fab_c['score']:.4f} >= 0.5, Onco score = {fab_o['score']:.4f} >= 0.5 (Safety Floor Active)")
 
     print("\n[SUCCESS] Two-Team Demo verified: (a) Personalized administrative down-ranking and (b) Clinical safety floor both functioning perfectly!")
 

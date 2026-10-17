@@ -104,7 +104,10 @@ class AnalystAgent:
                 fallback_reason = None
 
                 # Check if LLM_MODE=on and OpenAI-compatible caller is configured
-                tool_caller = OpenAICompatToolCaller()
+                if os.getenv("TESTING") == "1":
+                    tool_caller = OpenAICompatToolCaller(max_retries=1, initial_backoff=0.01)
+                else:
+                    tool_caller = OpenAICompatToolCaller()
                 if settings.llm_mode == "on" and tool_caller.is_available():
                     async def session_caller(name: str, args: Dict[str, Any]) -> Any:
                         if name in ("blast_radius", "contamination_clusters", "path_to_decision"):
@@ -228,7 +231,7 @@ class AnalystAgent:
                         "selected_by": mode_label,
                     })
 
-                    decisions = out_blast.get("at_risk_decisions", [])
+                    decisions = sorted(out_blast.get("at_risk_decisions", []), key=lambda x: x.get("decision_id", ""))
                     target_decision_id = decisions[0]["decision_id"] if decisions else "DEC-CARDIO-001"
 
                     out_path = await self._execute_tool(session, "path_to_decision", {
@@ -334,7 +337,7 @@ class AnalystAgent:
                     })
 
                     # Step 5: path_to_decision (Shortest path)
-                    decisions = out_1.get("at_risk_decisions", [])
+                    decisions = sorted(out_1.get("at_risk_decisions", []), key=lambda x: x.get("decision_id", ""))
                     target_decision_id = decisions[0]["decision_id"] if decisions else "DEC-CARDIO-001"
                     args_5 = {"retraction_id": retraction_id, "decision_id": target_decision_id}
                     out_5 = await self._execute_tool(session, "path_to_decision", args_5)

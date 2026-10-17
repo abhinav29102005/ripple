@@ -14,6 +14,15 @@ class StatisticianHandler:
     def handle(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         ret_id = payload["retraction_id"]
         rev_id = payload["review_id"]
+        category = payload.get("reason_category")
+        if not category or category == "unknown":
+            res = self.knowledge.graph.query(
+                "MATCH (r:Retraction {id: $rid}) RETURN r.reason_category", {"rid": ret_id}
+            )
+            if res.result_set and res.result_set[0][0]:
+                category = res.result_set[0][0]
+            else:
+                category = "unknown"
 
         trials = self.knowledge.get_review_trials(rev_id)
         retracted_ids = [t["id"] for t in trials if t.get("status") == "retracted"]
@@ -27,6 +36,7 @@ class StatisticianHandler:
             "id": impact_id,
             "review_id": rev_id,
             "retraction_id": ret_id,
+            "reason_category": category,
             "before": impact["before"],
             "before_lo": impact["before_lo"],
             "before_hi": impact["before_hi"],
@@ -43,6 +53,7 @@ class StatisticianHandler:
             "impact_id": impact_id,
             "review_id": rev_id,
             "retraction_id": ret_id,
+            "reason_category": category,
             "pct_change": impact["pct_change"],
             "flips": impact["flips"],
             "weight_share": impact["weight_share"],

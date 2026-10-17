@@ -10,7 +10,7 @@
 [![FalkorDB](https://img.shields.io/badge/Graph_Database-FalkorDB%20v4.22+-E11D48?style=for-the-badge&logo=redis&logoColor=white)](https://falkordb.com)
 [![Python](https://img.shields.io/badge/Python-3.12%20|%203.14-3B82F6?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
 [![FastAPI](https://img.shields.io/badge/API-FastAPI-059669?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
-[![Tests](https://img.shields.io/badge/Tests-32%20Passed-10B981?style=for-the-badge)](tests/)
+[![Tests](https://img.shields.io/badge/Tests-36%20Passed-10B981?style=for-the-badge)](tests/)
 
 ---
 
@@ -47,6 +47,8 @@ FalkorDB is not an auxiliary cache in Ripple; it is the single authoritative sou
 
 ### Track 02: Agent Memory and Coordination (Primary Track)
 - **Why it qualifies:** Ripple implements a complete FalkorDB-native coordination engine with atomic task claiming, dependency-gated fan-out (`ingest -> trace -> (quantify x N) -> brief`), lease heartbeats, and self-healing recovery. It pairs coordination with procedural tenant memory (`Session -> Episode -> Rule -> Ranking`) where team feedback autonomously consolidates into scoring rules.
+> **Note on LLM Provider Rate Limits:** The Groq free tier enforces token-per-minute (TPM) rate limits, so submit analyst questions one at a time. Every execution trace explicitly labels whether the run executed via `model-selected tools` or `fixed planner (fallback)`.
+
 - **Hero Proof:**
   - **High Concurrency Benchmark:** 16 concurrent workers executing 500 tasks with **0 double-claims** at **364.2 tasks/sec (p50: 9.74ms, p95: 35.51ms)** (`scripts/bench.py`).
   - **Chaos Worker Assassination:** Two workers killed mid-run with `kill -9`; leases expire; tasks auto-reclaim and finish with **100% completion (200/200)** and **0 tasks lost** (`scripts/chaos.py`).
@@ -262,8 +264,10 @@ All Cypher queries are maintained as named constants across Ripple's modules:
 |---|---|---|
 | `FALKORDB_HOST` | `localhost` | FalkorDB hostname or Cloud endpoint |
 | `FALKORDB_PORT` | `6380` | FalkorDB host port (mapped to container 6379, avoiding local Redis collisions) |
-| `LLM_MODE` | `off` | `off` (deterministic offline planner) or `on` (live Gemini function calling) |
-| `GEMINI_API_KEY`| *(empty)* | Google Gemini API key for `LLM_MODE=on` |
+| `LLM_MODE` | `off` | `off` (fixed planner) or `on` (model-selected tools via OpenAI-compatible provider) |
+| `LLM_BASE_URL` | *(empty)* | Base URL for OpenAI-compatible endpoint (e.g. `https://api.groq.com/openai/v1`) |
+| `LLM_API_KEY` | *(empty)* | API key for LLM provider (Groq, Mistral, OpenRouter) |
+| `LLM_MODEL` | *(empty)* | Model ID (e.g. `openai/gpt-oss-120b`) |
 | `PUBLIC_MODE` | `0` | Set `1` to enable public-demo hardening: disables `/api/reset` and `/api/chaos/run` (HTTP 403) and rate-limits LLM endpoints to 10 req/min (HTTP 429) |
 | `API_PORT` | `8000` | Port for FastAPI backend & web UI |
 
@@ -298,13 +302,16 @@ python -m scripts.demo_two_teams
 ```bash
 pytest -v tests/
 ```
-*All 32 unit, concurrency, isolation, and pipeline tests will execute.*
+*All 36 unit, concurrency, isolation, and pipeline tests will execute.*
 
-### 5. Launch Ripple Web Application
+### 5. Launch Full System (Web App + 5 Agent Workers)
+Launch the unified server that starts FastAPI and all 5 FalkorDB-coordinated background workers (`watcher`, `tracer`, `statistician`, `briefer`, `librarian`):
 ```bash
-uvicorn api:app --host 0.0.0.0 --port 8000
+python scripts/run_all.py
+# Or: python -m scripts.run_all
 ```
 Open your browser to: **`http://localhost:8000`**
+*(Press Ctrl+C at any time for clean graceful shutdown of both web service and all background workers).*
 
 ---
 
@@ -321,12 +328,13 @@ Open your browser to: **`http://localhost:8000`**
   3. Watch the real-time tool calling trace execute across PageRank, WCC, and Shortest Path.
   4. Notice the newly opened incident ticket (`TCK-MCP-...`) linked to the at-risk decision in the graph.
 - **Act 3: Tenant Memory & Fault-Tolerant Coordination (75s):**
-  1. In Ranked Alerts, click "Why this rank?" on an administrative alert to view baseline scoring.
-  2. Click "✕ Dismiss" on 3 administrative alerts.
-  3. Watch Panel 3: The Librarian immediately consolidates the feedback into active rule `rule_administrative_low` ($\Delta = -0.3$).
-  4. Notice the alert score immediately drops by 0.3, and "Why this rank?" now displays the applied rule and its 3 source episodes.
-  5. Switch tenant to `Oncology Committee` $\rightarrow$ observe that Oncology's memory and rankings remain isolated and untouched.
-  6. Run `python scripts/chaos.py` in terminal $\rightarrow$ witness two workers assassinated with `kill -9` while leases auto-reclaim and all tasks finish with 0 double claims.
+  1. Click **Load Demo Scenario** in the top header to load low-weight administrative alerts for the selected tenant.
+  2. In Ranked Alerts, click "Why this rank?" on an alert to view baseline scoring with formula breakdown and no learned rules applied.
+  3. Click "✕ Dismiss" on 3 administrative alerts (`SYN-REV-ADM-01`, `SYN-REV-ADM-02`, `SYN-REV-ADM-03`).
+  4. Watch Panel 3: The Librarian immediately consolidates the episodic feedback into active rule `rule_administrative_low` ($\Delta = -0.3$).
+  5. Notice the remaining administrative alert (`SYN-REV-ADM-04`) score immediately drops by 0.3, and "Why this rank?" now displays the applied rule and its 3 source episodes, while `SYN-REV-001` (fabrication) remains protected by the clinical safety floor ($\ge 0.5$).
+  6. Switch tenant to `Oncology Committee` $\rightarrow$ observe that Oncology's memory and rankings remain isolated and untouched.
+  7. Run `python scripts/chaos.py` in terminal $\rightarrow$ witness two workers assassinated with `kill -9` while leases auto-reclaim and all tasks finish with 0 double claims.
 
 ---
 
@@ -359,7 +367,7 @@ Open your browser to: **`http://localhost:8000`**
                       Target Region: us-central1 (near GCP DB)
                                       |
                       +---------------v---------------+
-                      | FalkorDB Cloud (TLS 61804)    |
+                      | FalkorDB Cloud (TLS <port>)    |
                       | - coord graph                 |
                       | - knowledge graph             |
                       | - tenant_<id> graphs          |
@@ -370,7 +378,7 @@ Open your browser to: **`http://localhost:8000`**
    - **Service 1 (`web`):** Runs `uvicorn api:app --host 0.0.0.0 --port 8000`. Handles API calls, dashboard serving, and on-demand MCP analyst sessions.
    - **Service 2 (`workers`):** Runs the supervisor executing the 5 real workers (`watcher`, `tracer`, `statistician`, `briefer`, `librarian` via `agents/runner.py`). Workers continuously poll the `coord` graph, claim tasks atomically, maintain lease heartbeats, and reclaim expired leases.
 2. **Network Proximity:**
-   - Deploy both container services in Google Cloud Platform region `us-central1` (matching the FalkorDB Cloud endpoint `us-central1.gcp.cloud:61804`) to ensure sub-millisecond query latencies.
+   - Deploy both container services in Google Cloud Platform region `us-central1` (matching the FalkorDB Cloud endpoint `<cloud-host>:<port>`) to ensure low-latency query performance.
 3. **Public Mode & Rate Limiting:**
    - When `PUBLIC_MODE=1`, all `POST` routes (`/api/tasks`, `/api/dismiss`, `/api/run-analyst`, `/api/tenants/*/episodes`) are strictly rate-limited using a token-bucket limiter (10 requests/min per IP), and dangerous administrative resets (`/api/reset`) are disabled.
 4. **Environment Variables Required (Names Only):**

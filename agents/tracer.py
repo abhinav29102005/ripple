@@ -14,6 +14,15 @@ class TracerHandler:
 
     def handle(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         ret_id = payload["retraction_id"]
+        category = payload.get("reason_category")
+        if not category or category == "unknown":
+            res = self.knowledge.graph.query(
+                "MATCH (r:Retraction {id: $rid}) RETURN r.reason_category", {"rid": ret_id}
+            )
+            if res.result_set and res.result_set[0][0]:
+                category = res.result_set[0][0]
+            else:
+                category = "unknown"
 
         # 1. Traverse blast radius
         blast_items = self.knowledge.get_blast_radius(ret_id)
@@ -34,7 +43,7 @@ class TracerHandler:
             quantify_keys.append(q_key)
             self.coord.spawn_task(
                 task_type="quantify",
-                payload={"retraction_id": ret_id, "review_id": rev_id},
+                payload={"retraction_id": ret_id, "review_id": rev_id, "reason_category": category},
                 key=q_key,
                 priority=2,
                 parent_key=trace_key,
@@ -44,7 +53,7 @@ class TracerHandler:
         brief_key = f"brief:{ret_id}"
         brief_task_id = self.coord.spawn_task(
             task_type="brief",
-            payload={"retraction_id": ret_id, "affected_reviews": affected_review_ids},
+            payload={"retraction_id": ret_id, "affected_reviews": affected_review_ids, "reason_category": category},
             key=brief_key,
             priority=1,
             depends_on_keys=quantify_keys,

@@ -6,7 +6,7 @@ This document records the empirical verification of Ripple's core systems agains
 
 ## 1. Automated Test Suite
 
-- **Status:** **32 / 32 Passed (100%)**
+- **Status:** **36 / 36 Passed (100%)**
 - **Command:** `pytest tests/ -v`
 - **Coverage Areas:**
   - `tests/test_coord.py`: Task claim concurrency, lease expiration, heartbeat extension, double-claim prevention.
@@ -18,6 +18,8 @@ This document records the empirical verification of Ripple's core systems agains
   - `tests/test_llm_mock.py`: OpenAI-compatible multi-turn tool calling loop, 6-step cap, exponential backoff, and graceful fallback.
   - `tests/test_org_brain.py`: Organization evidence traversal, committee decision mapping, and expert lookups.
   - `tests/test_stats.py`: Meta-analytic fixed/random effects recomputation and statistical significance shifts.
+  - `tests/test_reason_normalization.py`: Classification and normalization of notice reason text, safe ingestion overrides.
+  - `tests/test_pipeline.py`: Full end-to-end retraction ingestion and API notice submission verification.
 
 ---
 
@@ -57,3 +59,12 @@ This document records the empirical verification of Ripple's core systems agains
 - **PageRank:** `CALL algo.pageRank(null, "INFORMS")` executed across the bipartite Review $\rightarrow$ Guideline evidence graph, yielding differentiated scores for all 5 clinical guidelines (top guideline `SYN-GL-001` at `0.0196`).
 - **Weakly Connected Components (WCC):** `CALL algo.WCC({nodeLabels: ['Review'], relationshipTypes: ['SHARES_TRIAL']})` isolates contaminated review clusters pooling retracted trials (Component 21: `SYN-REV-003`, `SYN-REV-004`).
 - **Shortest Path:** `CALL algo.SPpaths` finds exact evidence paths from retractions to compromised hospital decisions.
+
+## 6. Execution Environment & Verification Scope
+
+- **FalkorDB Cloud vs Local Environment:**
+  - Full cloud schema verification, graph seeding (`knowledge`, `coord`, `tenant_cardio`, `tenant_onco`), and graph algorithm smoke tests (`algo.pageRank`, `algo.WCC`, `algo.SPpaths`) were run and verified against FalkorDB Cloud on 2026-10-17.
+  - Concurrency throughput stress testing (16 workers, 500 tasks, zero double-claims) and local development runs were executed against the local FalkorDB instance (port 6380) to preserve Cloud instance quotas.
+- **LLM Presets:**
+  - Groq (`openai/gpt-oss-120b` via OpenAI-compatible endpoint) verified live with function-calling tool execution.
+  - Mistral, OpenRouter, and Ollama configuration presets are structurally validated in `llm.py` and `tests/test_llm_mock.py`, but not verified with live keys.

@@ -38,7 +38,7 @@ def test_tenant_isolation_episodes_and_rules():
         hit_rate=1.0,
         description="Cardio team dismissal policy",
     )
-    cardio_mem.set_fact("guideline_authority", "ACC/AHA")
+    cardio_mem.set_fact("guideline_authority", "Cardiology Clinical Evidence Board (CCEB)")
 
     # Verify Cardio sees its data
     assert len(cardio_mem.get_episodes()) == 1
@@ -51,11 +51,11 @@ def test_tenant_isolation_episodes_and_rules():
     assert len(onco_mem.get_facts()) == 0
 
     # Oncology sets its own fact
-    onco_mem.set_fact("guideline_authority", "ASCO/NCCN")
+    onco_mem.set_fact("guideline_authority", "Oncology Research Review Board (ORRB)")
     assert len(onco_mem.get_facts()) == 1
-    assert onco_mem.get_facts()[0]["value"] == "ASCO/NCCN"
+    assert onco_mem.get_facts()[0]["value"] == "Oncology Research Review Board (ORRB)"
 
     # Cardio still only sees its own authority
     cardio_facts = cardio_mem.get_facts()
     assert len(cardio_facts) == 1
-    assert cardio_facts[0]["value"] == "ACC/AHA"
+    assert cardio_facts[0]["value"] == "Cardiology Clinical Evidence Board (CCEB)"

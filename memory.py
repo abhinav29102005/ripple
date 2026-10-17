@@ -41,7 +41,7 @@ ORDER BY m.seq ASC
 """
 
 CYPHER_RECORD_EPISODE = """
-MATCH (s:Session {id: $session_id})
+MERGE (s:Session {id: $session_id})
 CREATE (e:Episode {
     id: $id,
     ts: $now,
@@ -140,9 +140,15 @@ MERGE (item:Item {id: $item_id, ext_id: $ext_id, kind: $kind})
 MERGE (rk)-[:RANKED {rank: $rank, score: $score, base: $base}]->(item)
 """
 
+CYPHER_LINK_ITEM_RULE = """
+MATCH (item:Item {id: $item_id}), (r:Rule {id: $rule_id})
+MERGE (item)-[:APPLIED]->(r)
+"""
+
 CYPHER_EXPLAIN_RANKING = """
 MATCH (rk:Ranking {id: $ranking_id})-[rel:RANKED]->(item:Item {ext_id: $review_id})
-OPTIONAL MATCH (rk)-[u:USED]->(r:Rule)
+OPTIONAL MATCH (item)-[:APPLIED]->(r:Rule)
+OPTIONAL MATCH (rk)-[u:USED]->(r)
 OPTIONAL MATCH (r)-[:LEARNED_FROM]->(e:Episode)
 RETURN item.ext_id AS review_id, rel.rank AS rank, rel.score AS score, rel.base AS base,
        r.id AS rule_id, r.feature AS feature, r.value AS value, u.delta AS delta,
@@ -343,6 +349,11 @@ class TenantMemory:
                 "score": float(item["score"]),
                 "base": float(item["base"]),
             })
+            for r in item.get("applied_rules", []):
+                self.graph.query(CYPHER_LINK_ITEM_RULE, {
+                    "item_id": item_id,
+                    "rule_id": r["id"],
+                })
 
         return ranking_id
 
