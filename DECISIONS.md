@@ -92,3 +92,20 @@ Running log of decisions, verification results, and adaptations made during deve
 - FalkorDB atomic claim enforces that the `Briefer` cannot claim its task until all `quantify` tasks have completed.
 - Each `Statistician` computes effect sizes and persists native `Impact` nodes connected via `(Impact)-[:OF]->(Review)`.
 - Verified end-to-end in `tests/test_pipeline.py`.
+
+---
+
+## 2026-10-17: Milestone M3 - Tenant Memory & Procedural Ranking
+
+### 1. Isolated Tenant Memory Graphs (`memory.py`)
+- **Graph per Team:** Isolated graph `tenant_<id>` ensures zero cross-tenant data leaks. Verified in `tests/test_isolation.py`.
+- **Episodic Feedback:** User actions (`dismiss`, `escalate`, `correct`, `note`) are captured with alert context (`reason`, `weight_bucket`, `flips`, `ext_review`, `ext_retraction`) and linked to conversational sessions via `(Episode)-[:IN]->(Session)`.
+- **Semantic Memory with Supersession:** Fact updates never delete prior knowledge. When a fact key is updated, the previous node receives `valid_to = $now`, and a new node is created with `(new)-[:SUPERSEDES]->(old)`.
+- **Explainable Ranking Traversal:** Every alert ranking generates a `Ranking` node with `(Ranking)-[:RANKED]->(Item)` and `(Ranking)-[:USED {delta}]->(Rule)`. The traversal path from ranking to applied rules and their source episodes `(Rule)-[:LEARNED_FROM]->(Episode)` provides human-readable explanations for UI and chat.
+
+### 2. Procedural Consolidation (`Librarian`)
+- Evaluates recent episodic feedback across alert feature dimensions (`reason`, `weight_bucket`, `flips`).
+- 3+ episodes with $\ge 80\%$ dismiss rate generate/update an active rule with $\Delta = -0.3$.
+- 3+ episodes with $\ge 80\%$ escalate rate generate/update an active rule with $\Delta = +0.3$.
+- Contradictory feedback lowers a rule's hit rate; falling below $50\%$ transitions the rule to `retired`.
+- Verified in `tests/test_memory.py` and via REST API in `tests/test_api_m3.py`.

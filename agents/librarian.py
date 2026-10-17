@@ -1,0 +1,110 @@
+"""
+Librarian Agent: consolidates episodic feedback into active procedural rules
+and semantic facts. Updates hit rates, delta adjustments, and retires stale rules.
+"""
+from collections import defaultdict
+from typing import Any, Dict, List, Optional
+from memory import TenantMemory
+
+class LibrarianHandler:
+    def __init__(self, tenant_memory: TenantMemory):
+        self.memory = tenant_memory
+
+    def consolidate(self) -> Dict[str, Any]:
+        episodes = self.memory.get_episodes()
+        active_rules = {r["id"]: r for r in self.memory.get_active_rules()}
+
+        # Group episodes by (feature, value)
+        # Features to evaluate: reason, weight_bucket, flips
+        feature_episodes: Dict[tuple, List[Dict[str, Any]]] = defaultdict(list)
+
+        for ep in episodes:
+            if ep.get("reason"):
+                feature_episodes[("reason", str(ep["reason"]).lower())].append(ep)
+            if ep.get("weight_bucket"):
+                feature_episodes[("weight_bucket", str(ep["weight_bucket"]).lower())].append(ep)
+            if "flips" in ep:
+                feature_episodes[("flips", str(ep["flips"]).lower())].append(ep)
+
+        created_rules = []
+        updated_rules = []
+        retired_rules = []
+
+        for (feat, val), eps in feature_episodes.items():
+            rule_id = f"rule_{feat}_{val}"
+            total = len(eps)
+            if total < 3:
+                continue
+
+            dismiss_count = sum(1 for e in eps if e["kind"] == "dismiss")
+            escalate_count = sum(1 for e in eps if e["kind"] == "escalate")
+            dismiss_rate = dismiss_count / total
+            escalate_rate = escalate_count / total
+
+            ep_ids = [e["id"] for e in eps]
+
+            if dismiss_rate >= 0.8:
+                delta = -0.3
+                desc = f"Down-rank alerts where {feat} is '{val}' by 0.3 (based on {dismiss_count}/{total} dismissals)"
+                self.memory.save_rule(
+                    rule_id=rule_id,
+                    feature=feat,
+                    value=val,
+                    delta=delta,
+                    support=total,
+                    hit_rate=round(dismiss_rate, 2),
+                    description=desc,
+                    episode_ids=ep_ids,
+                    status="active",
+                )
+                if rule_id in active_rules:
+                    updated_rules.append(rule_id)
+                else:
+                    created_rules.append(rule_id)
+
+            elif escalate_rate >= 0.8:
+                delta = 0.3
+                desc = f"Up-rank alerts where {feat} is '{val}' by 0.3 (based on {escalate_count}/{total} escalations)"
+                self.memory.save_rule(
+                    rule_id=rule_id,
+                    feature=feat,
+                    value=val,
+                    delta=delta,
+                    support=total,
+                    hit_rate=round(escalate_rate, 2),
+                    description=desc,
+                    episode_ids=ep_ids,
+                    status="active",
+                )
+                if rule_id in active_rules:
+                    updated_rules.append(rule_id)
+                else:
+                    created_rules.append(rule_id)
+
+            else:
+                # Contradicting feedback: check if an active rule should be retired
+                if rule_id in active_rules:
+                    existing = active_rules[rule_id]
+                    # If previously dismiss rule, hit rate is dismiss_rate; if escalate rule, escalate_rate
+                    eff_rate = dismiss_rate if existing["delta"] < 0 else escalate_rate
+                    if eff_rate < 0.5:
+                        desc = f"Retired rule for {feat}='{val}' (hit rate dropped to {eff_rate:.2f})"
+                        self.memory.save_rule(
+                            rule_id=rule_id,
+                            feature=feat,
+                            value=val,
+                            delta=existing["delta"],
+                            support=total,
+                            hit_rate=round(eff_rate, 2),
+                            description=desc,
+                            episode_ids=ep_ids,
+                            status="retired",
+                        )
+                        retired_rules.append(rule_id)
+
+        return {
+            "created_rules": created_rules,
+            "updated_rules": updated_rules,
+            "retired_rules": retired_rules,
+            "total_episodes_analyzed": len(episodes),
+        }
