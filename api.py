@@ -199,3 +199,38 @@ def add_fact(tenant: str, fact: FactSubmission):
     mem = TenantMemory(tenant)
     fid = mem.set_fact(fact.key, fact.value)
     return {"status": "ok", "fact_id": fid}
+
+# --- Track 03 (Company Brain) Endpoints ---
+
+@app.get("/api/decisions/at-risk/{retraction_id}")
+def get_at_risk_decisions_endpoint(retraction_id: str):
+    knowledge = KnowledgeEngine(graph_manager.get_graph("knowledge"))
+    decisions = knowledge.get_at_risk_decisions(retraction_id)
+    return {"retraction_id": retraction_id, "at_risk_decisions": decisions}
+
+@app.get("/api/decisions/{decision_id}/trace")
+def get_decision_trace_endpoint(decision_id: str):
+    knowledge = KnowledgeEngine(graph_manager.get_graph("knowledge"))
+    trace = knowledge.get_decision_trace(decision_id)
+    if not trace:
+        raise HTTPException(status_code=404, detail="Decision not found")
+    return trace
+
+@app.get("/api/who-knows")
+def who_knows_endpoint(topic: str = Query(..., description="Medical topic to search expertise")):
+    knowledge = KnowledgeEngine(graph_manager.get_graph("knowledge"))
+    experts = knowledge.who_knows(topic)
+    return {"topic": topic, "experts": experts}
+
+@app.get("/api/guidelines/criticality")
+def get_guideline_criticality():
+    knowledge = KnowledgeEngine(graph_manager.get_graph("knowledge"))
+    ranked = knowledge.rank_guidelines_pagerank()
+    return {"critical_guidelines": ranked}
+
+@app.get("/api/clusters")
+def get_contamination_clusters():
+    knowledge = KnowledgeEngine(graph_manager.get_graph("knowledge"))
+    pairs = knowledge.build_contamination_clusters()
+    components = knowledge.get_wcc_clusters()
+    return {"shared_trial_pairs": pairs, "components": components}

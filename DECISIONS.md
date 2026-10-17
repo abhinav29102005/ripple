@@ -109,3 +109,18 @@ Running log of decisions, verification results, and adaptations made during deve
 - 3+ episodes with $\ge 80\%$ escalate rate generate/update an active rule with $\Delta = +0.3$.
 - Contradictory feedback lowers a rule's hit rate; falling below $50\%$ transitions the rule to `retired`.
 - Verified in `tests/test_memory.py` and via REST API in `tests/test_api_m3.py`.
+
+---
+
+## 2026-10-17: Milestone M4 - Track 03 Company Brain
+
+### 1. Synthetic Organization Knowledge Graph (`scripts/seed_org.py`)
+- Created 12 organizational members across 3 clinical committees (`Cardiology`, `Oncology`, `Methods`).
+- Planted 15 clinical decisions, 20 supporting documents, 30 chat messages, and 10 tickets linked to the synthetic evidence graph.
+- Planted deliberate demo pattern: `DEC-CARDIO-001` ("Hospital-wide Formulary Adoption of Triple-Antiplatelet Protocol") chaired by Dr. Sarah Chen, who also authored `SYN-REV-001`. The decision is based on reviews including trial `SYN-TR-0001`.
+
+### 2. Staleness Propagation & Multi-Hop Traces
+- **Staleness Propagation:** Processing retraction `SYN-RET-001` immediately flags `DEC-CARDIO-001` as `at_risk` with risk reason stored directly in Cypher.
+- **Decision Trace Endpoint:** `GET /api/decisions/{id}/trace` navigates from organizational decision through reviews, retracted trials, retraction notices, supporting document IDs (`DOC-001`, `DOC-002`, `DOC-003`), and discussion messages (`MSG-001`, `MSG-002`, `MSG-003`).
+- **Expertise Sourcing:** `GET /api/who-knows?topic=Cardiology` aggregates evidence count over `AUTHORED` and `PARTICIPATED_IN` edges, correctly ranking Dr. Sarah Chen as the top institutional expert.
+- Verified in `tests/test_org_brain.py`.

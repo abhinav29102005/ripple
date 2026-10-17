@@ -70,13 +70,14 @@ RETURN d.id AS decision, d.title AS title, rev.id AS review,
 """
 
 CYPHER_DECISION_TRACE = """
-MATCH (d:Decision {id: $did})-[:BASED_ON]->(rev:Review)
+MATCH (d:Decision {id: $did})
+OPTIONAL MATCH (d)-[:BASED_ON]->(rev:Review)
 OPTIONAL MATCH (t:Trial)-[:INCLUDED_IN]->(rev)
 OPTIONAL MATCH (r:Retraction)-[:RETRACTS]->(t)
 OPTIONAL MATCH (doc:Document)-[:SUPPORTS]->(d)
 OPTIONAL MATCH (m:Message)-[:MENTIONS]->(d)
 RETURN d.id AS decision_id, d.title AS decision_title, d.status AS status, d.risk_reason AS risk_reason,
-       rev.id AS review_id, rev.title AS review_title,
+       collect(DISTINCT rev.id) AS reviews,
        collect(DISTINCT t.id) AS trials,
        collect(DISTINCT r.id) AS retractions,
        collect(DISTINCT doc.id) AS documents,
@@ -211,12 +212,11 @@ class KnowledgeEngine:
             "decision_title": r[1],
             "status": r[2],
             "risk_reason": r[3],
-            "review_id": r[4],
-            "review_title": r[5],
-            "trials": r[6],
-            "retractions": r[7],
-            "documents": r[8],
-            "messages": r[9],
+            "reviews": r[4],
+            "trials": r[5],
+            "retractions": r[6],
+            "documents": r[7],
+            "messages": r[8],
         }
 
     def who_knows(self, topic: str) -> List[Dict[str, Any]]:
