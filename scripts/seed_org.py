@@ -126,7 +126,7 @@ def seed_organization(seed: int = 42):
         },
     ]
 
-    for i in range(4, 16):
+    for i in range(4, 28):
         com = "COM-CARDIO" if i % 2 == 0 else "COM-ONCO"
         gid = "SYN-GL-001" if i % 2 == 0 else "SYN-GL-002"
         rev_id = f"SYN-REV-{((i - 1) % 5) + 1:03d}"

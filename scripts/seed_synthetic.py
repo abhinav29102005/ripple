@@ -37,10 +37,10 @@ def seed_synthetic_data(scale: str = "standard", seed: int = 42) -> Dict[str, in
         num_guidelines = 60
         num_retractions = 500
     else:
-        num_trials = 40
-        num_reviews = 10
-        num_guidelines = 5
-        num_retractions = 4
+        num_trials = 90
+        num_reviews = 18
+        num_guidelines = 8
+        num_retractions = 6
 
     print(f"Seeding synthetic evidence ({scale} scale: {num_trials} trials, {num_reviews} reviews, {num_guidelines} guidelines)...")
 

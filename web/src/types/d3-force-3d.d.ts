@@ -135,4 +135,40 @@ declare module 'd3-force-3d' {
     iterations(): number;
     iterations(iterations: number): this;
   }
+
+  export function forceX<NodeDatum extends SimulationNodeDatum>(
+    x?: number | ((node: NodeDatum, i: number, d: NodeDatum[]) => number)
+  ): ForceX<NodeDatum>;
+
+  export interface ForceX<NodeDatum extends SimulationNodeDatum>
+    extends Force<NodeDatum, any> {
+    x(): number | ((node: NodeDatum, i: number, d: NodeDatum[]) => number);
+    x(x: number | ((node: NodeDatum, i: number, d: NodeDatum[]) => number)): this;
+    strength(): number | ((node: NodeDatum, i: number, d: NodeDatum[]) => number);
+    strength(strength: number | ((node: NodeDatum, i: number, d: NodeDatum[]) => number)): this;
+  }
+
+  export function forceY<NodeDatum extends SimulationNodeDatum>(
+    y?: number | ((node: NodeDatum, i: number, d: NodeDatum[]) => number)
+  ): ForceY<NodeDatum>;
+
+  export interface ForceY<NodeDatum extends SimulationNodeDatum>
+    extends Force<NodeDatum, any> {
+    y(): number | ((node: NodeDatum, i: number, d: NodeDatum[]) => number);
+    y(y: number | ((node: NodeDatum, i: number, d: NodeDatum[]) => number)): this;
+    strength(): number | ((node: NodeDatum, i: number, d: NodeDatum[]) => number);
+    strength(strength: number | ((node: NodeDatum, i: number, d: NodeDatum[]) => number)): this;
+  }
+
+  export function forceZ<NodeDatum extends SimulationNodeDatum>(
+    z?: number | ((node: NodeDatum, i: number, d: NodeDatum[]) => number)
+  ): ForceZ<NodeDatum>;
+
+  export interface ForceZ<NodeDatum extends SimulationNodeDatum>
+    extends Force<NodeDatum, any> {
+    z(): number | ((node: NodeDatum, i: number, d: NodeDatum[]) => number);
+    z(z: number | ((node: NodeDatum, i: number, d: NodeDatum[]) => number)): this;
+    strength(): number | ((node: NodeDatum, i: number, d: NodeDatum[]) => number);
+    strength(strength: number | ((node: NodeDatum, i: number, d: NodeDatum[]) => number)): this;
+  }
 }

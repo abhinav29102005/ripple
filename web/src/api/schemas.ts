@@ -48,6 +48,8 @@ export const GraphNodeSchema = z.object({
   notify: z.array(z.string()).optional().default([]),
   yi: z.number().optional(),
   sei: z.number().optional(),
+  hemisphere: z.string().optional(),
+  role: z.string().optional(),
 });
 
 export const GraphEdgeSchema = z.object({

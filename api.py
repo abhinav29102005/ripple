@@ -163,25 +163,117 @@ def get_graph_blast(retraction_id: str):
     nodes_map = {}
     edges = []
 
-    # Source retraction node
-    nodes_map[retraction_id] = {"id": retraction_id, "label": "Retraction", "title": f"Retraction {retraction_id}"}
+    # Source retraction node (Central Nucleus of the Brain)
+    nodes_map[retraction_id] = {
+        "id": retraction_id,
+        "label": "Retraction",
+        "title": f"Retraction Notice ({retraction_id})",
+        "hemisphere": "core",
+    }
 
     for item in items:
         trial_id = item["trial"]
         rev_id = item["review"]
 
         if trial_id not in nodes_map:
-            nodes_map[trial_id] = {"id": trial_id, "label": "Trial", "status": "retracted"}
+            nodes_map[trial_id] = {
+                "id": trial_id,
+                "label": "Trial",
+                "title": f"Retracted Trial {trial_id}",
+                "status": "retracted",
+                "hemisphere": "left",
+            }
         if rev_id not in nodes_map:
-            nodes_map[rev_id] = {"id": rev_id, "label": "Review", "yi": item["yi"], "sei": item["sei"]}
+            nodes_map[rev_id] = {
+                "id": rev_id,
+                "label": "Review",
+                "title": f"Systematic Review {rev_id}",
+                "yi": item["yi"],
+                "sei": item["sei"],
+                "hemisphere": "left",
+            }
 
         edges.append({"source": retraction_id, "target": trial_id, "type": "RETRACTS"})
         edges.append({"source": trial_id, "target": rev_id, "type": "INCLUDED_IN", "yi": item["yi"], "sei": item["sei"]})
 
         for gid in item.get("guidelines", []):
             if gid not in nodes_map:
-                nodes_map[gid] = {"id": gid, "label": "Guideline"}
+                nodes_map[gid] = {
+                    "id": gid,
+                    "label": "Guideline",
+                    "title": f"Clinical Practice Guideline {gid}",
+                    "hemisphere": "left",
+                }
             edges.append({"source": rev_id, "target": gid, "type": "INFORMS"})
+
+    # Primary reviews in blast
+    rev_ids = [n["id"] for n in nodes_map.values() if n["label"] == "Review"]
+
+    # Contamination neighbor reviews (cross-talk between left and right hemispheres)
+    if rev_ids:
+        contam_res = knowledge.graph.query(
+            "MATCH (r:Review)<-[:INCLUDED_IN]-(t:Trial)-[:INCLUDED_IN]->(r2:Review) "
+            "WHERE r.id IN $rev_ids AND r <> r2 "
+            "OPTIONAL MATCH (r2)-[:INFORMS]->(g2:Guideline) "
+            "RETURN r2.id AS r2id, t.id AS tid, g2.id AS g2id, r2.title AS r2title, g2.title AS g2title",
+            {"rev_ids": rev_ids}
+        )
+        for row in contam_res.result_set:
+            r2id, tid, g2id, r2title, g2title = row
+            if r2id not in nodes_map:
+                nodes_map[r2id] = {
+                    "id": r2id,
+                    "label": "Review",
+                    "title": r2title or r2id,
+                    "status": "contaminated",
+                    "hemisphere": "right",
+                }
+            if tid not in nodes_map:
+                nodes_map[tid] = {
+                    "id": tid,
+                    "label": "Trial",
+                    "title": tid,
+                    "status": "active",
+                    "hemisphere": "bridge",
+                }
+            edges.append({"source": tid, "target": r2id, "type": "INCLUDED_IN"})
+            if g2id:
+                if g2id not in nodes_map:
+                    nodes_map[g2id] = {
+                        "id": g2id,
+                        "label": "Guideline",
+                        "title": g2title or g2id,
+                        "hemisphere": "right",
+                    }
+                edges.append({"source": r2id, "target": g2id, "type": "INFORMS"})
+
+    # Co-included evidence trials that form the evidence base of these reviews
+    all_rev_ids = [n["id"] for n in nodes_map.values() if n["label"] == "Review"]
+    if all_rev_ids:
+        co_res = knowledge.graph.query(
+            "MATCH (t:Trial)-[inc:INCLUDED_IN]->(rev:Review) "
+            "WHERE rev.id IN $rev_ids "
+            "RETURN t.id AS tid, t.title AS title, t.status AS status, inc.yi AS yi, inc.sei AS sei, rev.id AS rid",
+            {"rev_ids": all_rev_ids}
+        )
+        for row in co_res.result_set:
+            tid, ttitle, tstatus, yi, sei, rid = row
+            if tid not in nodes_map:
+                parent_hemi = nodes_map.get(rid, {}).get("hemisphere", "left")
+                nodes_map[tid] = {
+                    "id": tid,
+                    "label": "Trial",
+                    "title": ttitle or tid,
+                    "status": tstatus or "active",
+                    "hemisphere": parent_hemi,
+                }
+            edges.append({
+                "source": tid,
+                "target": rid,
+                "type": "INCLUDED_IN",
+                "yi": float(yi) if yi is not None else 0.0,
+                "sei": float(sei) if sei is not None else 0.0,
+            })
 
     # Track 03: Decision nodes and Committee / owners to notify
     decisions = knowledge.get_at_risk_decisions(retraction_id)
@@ -195,15 +287,59 @@ def get_graph_blast(retraction_id: str):
                 "status": "at_risk",
                 "committee": d.get("committee", ""),
                 "notify": d.get("notify", []),
+                "hemisphere": "left",
             }
         rev_id = d.get("review_id")
         if rev_id and rev_id in nodes_map:
             edges.append({"source": did, "target": rev_id, "type": "BASED_ON"})
 
+    # Extended decision & governance context across both hemispheres
+    dec_res = knowledge.graph.query(
+        "MATCH (dec:Decision) "
+        "OPTIONAL MATCH (dec)-[:BASED_ON]->(rev:Review) "
+        "OPTIONAL MATCH (dec)-[:ABOUT]->(gl:Guideline) "
+        "OPTIONAL MATCH (dec)-[:MADE_BY]->(c:Committee) "
+        "OPTIONAL MATCH (p:Person)-[:PARTICIPATED_IN]->(dec) "
+        "RETURN dec.id, dec.title, dec.status, rev.id, gl.id, c.id, c.name, p.id, p.name, p.role"
+    )
+    for row in dec_res.result_set:
+        did, dtitle, dstatus, rid, gid, cid, cname, pid, pname, prole = row
+        if (rid and rid in nodes_map) or (gid and gid in nodes_map):
+            hemi = "right" if cid == "COM-ONCO" else "left"
+            if did not in nodes_map:
+                nodes_map[did] = {
+                    "id": did,
+                    "label": "Decision",
+                    "title": dtitle or did,
+                    "status": dstatus or "active",
+                    "committee": cname or "",
+                    "hemisphere": hemi,
+                }
+            if rid and rid in nodes_map:
+                edges.append({"source": did, "target": rid, "type": "BASED_ON"})
+            if gid and gid in nodes_map:
+                edges.append({"source": did, "target": gid, "type": "BASED_ON"})
+            if cid and cid not in nodes_map:
+                nodes_map[cid] = {"id": cid, "label": "Committee", "title": cname or cid, "hemisphere": hemi}
+            if cid:
+                edges.append({"source": did, "target": cid, "type": "GOVERNED_BY"})
+            if pid and pid not in nodes_map:
+                nodes_map[pid] = {"id": pid, "label": "Person", "title": pname or pid, "role": prole or "", "hemisphere": hemi}
+            if pid:
+                edges.append({"source": did, "target": pid, "type": "PARTICIPATED"})
+
+    edge_seen = set()
+    deduped_edges = []
+    for e in edges:
+        k = (e["source"], e["target"], e.get("type", ""))
+        if k not in edge_seen:
+            edge_seen.add(k)
+            deduped_edges.append(e)
+
     return {
         "retraction_id": retraction_id,
         "nodes": list(nodes_map.values()),
-        "edges": edges,
+        "edges": deduped_edges,
     }
 
 @app.get("/api/tenants/{tenant}/rankings")
