@@ -312,15 +312,8 @@ def load_demo_scenario(tenant: str, retraction_id: str = "SYN-RET-001"):
         })
         tr = tracer.handle({"retraction_id": adm_ret_id, "reason_category": "administrative"})
         for r in tr["affected_reviews"]:
-            stat.handle({"retraction_id": adm_ret_id, "review_id": r, "reason_category": "administrative"})
+            stat.handle({"retraction_id": retraction_id, "review_id": r, "reason_category": "administrative"})
         briefer.handle({"retraction_id": adm_ret_id})
-
-        # Also link impact to current retraction_id so they appear in current view
-        knowledge.graph.query(
-            "MATCH (imp:Impact {id: $imp_id}), (rev:Review {id: $rid}) "
-            "SET imp.retraction_id = $curr_ret_id",
-            {"imp_id": f"imp_{adm_ret_id}_{rid}", "rid": rid, "curr_ret_id": retraction_id}
-        )
         created_ids.append(rid)
 
     rankings_res = get_tenant_rankings(tenant, retraction_id)
