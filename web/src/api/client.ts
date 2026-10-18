@@ -1,6 +1,9 @@
 import * as schemas from './schemas';
 
-const rawBase = (import.meta.env.VITE_API_BASE ?? '').trim();
+const defaultBase = typeof window !== 'undefined' && window.location.hostname !== 'localhost' && !window.location.hostname.includes('127.0.0.1')
+  ? 'https://15-134-0-222.sslip.io'
+  : '';
+const rawBase = (import.meta.env.VITE_API_BASE || defaultBase).trim();
 export const API_BASE = rawBase.replace(/\/+$/, '');
 
 export function getApiUrl(path: string): string {
