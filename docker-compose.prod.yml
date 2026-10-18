@@ -1,0 +1,58 @@
+# Production Docker Compose for Ripple Backend & Caddy Reverse Proxy
+# Exposes ONLY ports 80 and 443 on the host for public HTTPS traffic.
+# SECURITY REQUIREMENT: FalkorDB ports (6379, 6380, 3000) are NOT published to the host network.
+
+services:
+  caddy:
+    image: caddy:2.9-alpine
+    container_name: ripple-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - SITE_ADDRESS=${SITE_ADDRESS}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - app
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ripple-app
+    restart: unless-stopped
+    environment:
+      - FALKORDB_HOST=falkordb
+      - FALKORDB_PORT=6379
+      - API_HOST=0.0.0.0
+      - API_PORT=8000
+      - TRUST_PROXY=${TRUST_PROXY:-1}
+      - CORS_ORIGINS=${CORS_ORIGINS:-}
+      - PUBLIC_MODE=${PUBLIC_MODE:-1}
+      - LLM_MODE=${LLM_MODE:-off}
+      - LLM_BASE_URL=${LLM_BASE_URL:-}
+      - LLM_API_KEY=${LLM_API_KEY:-}
+      - LLM_MODEL=${LLM_MODEL:-}
+    depends_on:
+      - falkordb
+    # App is only exposed internally to the Docker bridge network; Caddy proxies to port 8000.
+
+  falkordb:
+    image: falkordb/falkordb:latest
+    container_name: ripple-falkordb-prod
+    restart: unless-stopped
+    # CRITICAL SECURITY: Do NOT map ports to the host here (no "ports:" block).
+    environment:
+      - FALKORDB_DATA_PATH=/var/lib/falkordb/data
+      - REDIS_ARGS=--save 10 1 --appendonly yes
+    volumes:
+      - falkordb_prod_data:/var/lib/falkordb/data
+
+volumes:
+  caddy_data:
+  caddy_config:
+  falkordb_prod_data:

@@ -94,7 +94,7 @@ test.describe('Ripple Production UI End-to-End Suite', () => {
     const coordTabBtn = page.getByRole('button', { name: /Coordination Board/ });
     await coordTabBtn.click();
     await page.waitForTimeout(300);
-    await expect(page.getByText('Completed')).toBeVisible();
+    await expect(page.getByText('Completed', { exact: true })).toBeVisible();
     await page.screenshot({ path: path.join(screenshotsDir, 'coordination_tab.png') });
     console.log('[E2E PASS] Screenshot 4 captured: coordination_tab.png');
 
@@ -103,17 +103,22 @@ test.describe('Ripple Production UI End-to-End Suite', () => {
     await loadDemoBtn.click();
     await page.waitForTimeout(1200);
 
-    // Dismiss 3 administrative alerts
-    const count = await page.getByRole('button', { name: 'Dismiss' }).count();
-    console.log(`Found ${count} alert dismiss buttons`);
-    if (count >= 3) {
-      await page.getByRole('button', { name: 'Dismiss' }).nth(1).click();
-      await page.waitForTimeout(600);
-      await page.getByRole('button', { name: 'Dismiss' }).nth(1).click();
-      await page.waitForTimeout(600);
-      await page.getByRole('button', { name: 'Dismiss' }).nth(1).click();
-      await page.waitForTimeout(1000);
-    }
+    // Dismiss 3 administrative alerts by exact review card IDs
+    const adm01 = page.locator('[data-testid="alert-card-SYN-REV-ADM-01"]');
+    const adm02 = page.locator('[data-testid="alert-card-SYN-REV-ADM-02"]');
+    const adm03 = page.locator('[data-testid="alert-card-SYN-REV-ADM-03"]');
+
+    await expect(adm01).toBeVisible({ timeout: 10000 });
+    await adm01.getByRole('button', { name: 'Dismiss' }).click();
+    await page.waitForTimeout(600);
+
+    await expect(adm02).toBeVisible({ timeout: 5000 });
+    await adm02.getByRole('button', { name: 'Dismiss' }).click();
+    await page.waitForTimeout(600);
+
+    await expect(adm03).toBeVisible({ timeout: 5000 });
+    await adm03.getByRole('button', { name: 'Dismiss' }).click();
+    await page.waitForTimeout(1500);
 
     // Step 7: Memory Tab & Screenshot 5
     const memoryTabBtn = page.getByRole('button', { name: /Adaptive Memory/ });

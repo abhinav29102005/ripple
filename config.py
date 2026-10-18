@@ -24,5 +24,7 @@ class Settings(BaseModel):
     reclaim_interval_sec: int = Field(default_factory=lambda: int(os.getenv("RECLAIM_INTERVAL_SEC", "5")))
     random_seed: int = Field(default_factory=lambda: int(os.getenv("RANDOM_SEED", "42")))
     public_mode: bool = Field(default_factory=lambda: os.getenv("PUBLIC_MODE", "0").lower() in ("1", "true", "yes"))
+    cors_origins: list[str] = Field(default_factory=lambda: [o.strip() for o in os.getenv("CORS_ORIGINS", "").split(",") if o.strip()])
+    trust_proxy: bool = Field(default_factory=lambda: os.getenv("TRUST_PROXY", "0").lower() in ("1", "true", "yes"))
 
 settings = Settings()

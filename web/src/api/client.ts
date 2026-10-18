@@ -1,5 +1,14 @@
 import * as schemas from './schemas';
 
+const rawBase = (import.meta.env.VITE_API_BASE ?? '').trim();
+export const API_BASE = rawBase.replace(/\/+$/, '');
+
+export function getApiUrl(path: string): string {
+  const cleanPath = path.startsWith('/') ? path : `/${path}`;
+  return `${API_BASE}${cleanPath}`;
+}
+
+
 
 export class ApiError extends Error {
   status: number;
@@ -14,10 +23,11 @@ export class ApiError extends Error {
 }
 
 async function request<T>(
-  url: string,
+  path: string,
   schema: { safeParse: (val: unknown) => { success: true; data: T } | { success: false; error: any } },
   options?: RequestInit
 ): Promise<T> {
+  const url = getApiUrl(path);
   const res = await fetch(url, {
     ...options,
     headers: {
@@ -66,7 +76,7 @@ export const api = {
     request(`/api/tenants/${tenant}/memory`, schemas.MemoryResponseSchema),
 
   loadDemoScenario: (tenant: string, retractionId: string) =>
-    fetch(`/api/tenants/${tenant}/load-demo?retraction_id=${retractionId}`, { method: 'POST' }).then(r => r.json()),
+    fetch(getApiUrl(`/api/tenants/${tenant}/load-demo?retraction_id=${retractionId}`), { method: 'POST' }).then(r => r.json()),
 
   recordEpisode: (tenant: string, payload: {
     session_id?: string | null;
@@ -78,7 +88,7 @@ export const api = {
     ext_retraction: string;
     notes?: string;
   }) =>
-    fetch(`/api/tenants/${tenant}/episodes`, {
+    fetch(getApiUrl(`/api/tenants/${tenant}/episodes`), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
@@ -91,7 +101,7 @@ export const api = {
     reason_category?: string;
     notice_url?: string;
   }) =>
-    fetch('/api/retractions', {
+    fetch(getApiUrl('/api/retractions'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),

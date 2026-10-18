@@ -36,10 +36,25 @@ RATE_LIMIT_WINDOW = 60  # seconds
 RATE_LIMIT_MAX_REQUESTS = 10  # max requests per window in public mode
 _ip_request_timestamps = defaultdict(list)
 
+def get_client_ip(request: Request) -> str:
+    trust_proxy = os.getenv("TRUST_PROXY", "0").lower() in ("1", "true", "yes")
+    if trust_proxy:
+        xff = request.headers.get("x-forwarded-for")
+        if xff:
+            # Last value added by the trusted proxy
+            parts = [p.strip() for p in xff.split(",") if p.strip()]
+            if parts:
+                return parts[-1]
+    return request.client.host if (request.client and request.client.host) else "127.0.0.1"
+
+def reset_rate_limits():
+    _ip_request_timestamps.clear()
+
 def check_public_rate_limit(request: Request):
-    if not settings.public_mode:
+    public_mode = os.getenv("PUBLIC_MODE", "0").lower() in ("1", "true", "yes") or settings.public_mode
+    if not public_mode:
         return
-    client_ip = request.client.host if request.client else "unknown"
+    client_ip = get_client_ip(request)
     now = time.time()
     _ip_request_timestamps[client_ip] = [ts for ts in _ip_request_timestamps[client_ip] if now - ts < RATE_LIMIT_WINDOW]
     if len(_ip_request_timestamps[client_ip]) >= RATE_LIMIT_MAX_REQUESTS:
@@ -49,11 +64,20 @@ def check_public_rate_limit(request: Request):
         )
     _ip_request_timestamps[client_ip].append(now)
 
+class DynamicCORSMiddleware(CORSMiddleware):
+    def is_allowed_origin(self, origin: str) -> bool:
+        env_origins = [o.strip() for o in os.getenv("CORS_ORIGINS", "").split(",") if o.strip()]
+        allowed = set(self.allow_origins) | set(env_origins)
+        return origin in allowed
+
+cors_origins_raw = os.getenv("CORS_ORIGINS", "").strip()
+initial_allowed_origins = [o.strip() for o in cors_origins_raw.split(",") if o.strip()]
+
 app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
+    DynamicCORSMiddleware,
+    allow_origins=initial_allowed_origins,
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
 )
 
