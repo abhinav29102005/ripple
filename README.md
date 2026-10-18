@@ -310,7 +310,9 @@ Launch the unified server that starts FastAPI and all 5 FalkorDB-coordinated bac
 python scripts/run_all.py
 # Or: python -m scripts.run_all
 ```
-Open your browser to: **`http://localhost:8000`**
+Open your browser to: **`http://localhost:8000/`**
+- **Production React Interface:** Served directly at `/` from the pre-bundled `web/dist/` build. Node.js is **not required** to run Ripple; it is only needed if you wish to modify and recompile the frontend (`cd web && npm run build`).
+- **Legacy UI:** The previous HTML/JS interface remains fully accessible at `http://localhost:8000/legacy`.
 *(Press Ctrl+C at any time for clean graceful shutdown of both web service and all background workers).*
 
 ---
@@ -420,3 +422,20 @@ Open your browser to: **`http://localhost:8000`**
 ## 12. AI Assistance Disclosure
 
 Design and specification drafted with Claude (Anthropic); implementation and testing with Antigravity (Google DeepMind). *(Note: User confirmation required)*. All architectural decisions, performance benchmarks, and adaptations are logged in [DECISIONS.md](DECISIONS.md).
+
+
+---
+
+## 9. Interface Gallery (Production React UI)
+
+The React interface (`web/`) is a restrained, single-screen operational workspace featuring dark-mode design tokens, WCAG AA compliance, and a purposeful 3D radial blast radius scene.
+
+| View | Screenshot | Description |
+|---|---|---|
+| **Workspace Overview** | ![Workspace Overview](docs/screenshots/workspace_overview.png) | Single-screen operations center with header controls, 3D blast scene, inspector, ranked alerts, and dock. |
+| **3D Ripple Wave** | ![3D Ripple Wave](docs/screenshots/mid_ripple.png) | Radial hop visualization where distance from center equals evidentiary hops from the retraction. |
+| **Inspector & At-Risk Decision** | ![Inspector Decision](docs/screenshots/inspector_decision.png) | Inspecting `DEC-CARDIO-001` flagged `at_risk` with responsible Steering Committee and notify owners. |
+| **Coordination Board** | ![Coordination Board](docs/screenshots/coordination_tab.png) | Live FalkorDB-coordinated task board: queued, claimed with lease countdown, done, failed, and worker list. |
+| **Adaptive Tenant Memory** | ![Memory Tab](docs/screenshots/memory_tab.png) | Active procedural rules consolidated by the Librarian from episodic feedback, with full provenance. |
+| **Autonomous Analyst Trace** | ![Analyst Trace](docs/screenshots/analyst_trace.png) | Execution trace showing model-selected graph algorithms (PageRank, WCC, Shortest Paths) and auto-opened ticket. |
+| **Empirical Proof & Chaos** | ![Proof Tab](docs/screenshots/proof_tab.png) | Live telemetry showing 364.2 tasks/sec concurrency benchmark, 0 double claims, and chaos recovery. |

@@ -1,3 +1,5 @@
+import os
+import json
 from agents.watcher import WatcherHandler
 from agents.tracer import TracerHandler
 from agents.statistician import StatisticianHandler
@@ -493,9 +495,7 @@ def analyst_endpoint(req: AnalystRequest, request: Request):
         "algorithms_used": res["algorithms_used"],
     }
 
-# --- Mount Static UI ---
-from fastapi.staticfiles import StaticFiles
-app.mount("/", StaticFiles(directory="ui", html=True), name="ui")
+# Static UI mounting moved to bottom of file after all API routes
 
 # --- Benchmark & Chaos Telemetry Endpoints ---
 
@@ -514,3 +514,15 @@ def get_chaos_latest():
         raise HTTPException(status_code=404, detail="Chaos experiment not run yet")
     with open(path) as f:
         return json.load(f)
+
+# --- Mount Static UI (New React App at /, Legacy at /legacy) ---
+from fastapi.staticfiles import StaticFiles
+
+# Always keep legacy UI accessible at /legacy
+app.mount("/legacy", StaticFiles(directory="ui", html=True), name="legacy_ui")
+
+# Serve React production build at / if available, otherwise fallback to legacy ui
+if os.path.exists("web/dist"):
+    app.mount("/", StaticFiles(directory="web/dist", html=True), name="react_ui")
+else:
+    app.mount("/", StaticFiles(directory="ui", html=True), name="ui")
